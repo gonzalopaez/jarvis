@@ -1,0 +1,39 @@
+# Environment and local configuration
+.env
+.env.*
+!.env.example
+*.local
+config/local/
+
+# Secrets and credentials
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+target/
+coverage/
+
+# Logs, caches, and temporary media
+*.log
+logs/
+*.tmp
+*.wav
+*.mp3
+*.ogg
+.cache/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Tauri generated schemas
+**/src-tauri/gen/schemas/
