@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/api/core-request.v1.schema.json",
+  "title": "Jarvis Core request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "request_id", "session_id", "kind"],
+  "properties": {
+    "api_version": { "const": "v1" },
+    "request_id": { "$ref": "#/$defs/correlationId" },
+    "session_id": { "$ref": "#/$defs/correlationId" },
+    "kind": { "enum": ["conversation", "action"] },
+    "message": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "action": { "$ref": "#/$defs/action" }
+  },
+  "oneOf": [
+    {
+      "properties": { "kind": { "const": "conversation" } },
+      "required": ["message"],
+      "not": { "required": ["action"] }
+    },
+    {
+      "properties": { "kind": { "const": "action" } },
+      "required": ["action"],
+      "not": { "required": ["message"] }
+    }
+  ],
+  "$defs": {
+    "correlationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.:-]+$"
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "target", "parameters"],
+      "properties": {
+        "capability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9_.:-]+$"
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9_.:-]+$"
+        },
+        "parameters": {
+          "type": "object",
+          "description": "Non-sensitive structured parameters only."
+        }
+      }
+    }
+  }
+}
