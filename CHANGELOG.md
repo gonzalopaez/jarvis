@@ -10,6 +10,8 @@ All notable changes follow Keep a Changelog principles and semantic versioning.
 - Deny-by-default Core policy engine, authentication boundary and restricted executor contract.
 - Security tests for validation, authorization, execution verification and audit behavior.
 - Minimal Hyper transport with exact routes, opaque authentication, bounded bodies, deadlines and sanitized errors.
+- Hashed Bearer-token authentication with constant-time comparison and server-owned identities.
+- Listener policy that rejects unspecified and public bind addresses.
 
 ## [0.1.0-clean] - 2026-08-08
 

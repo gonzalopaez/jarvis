@@ -15,3 +15,7 @@ The current Core foundation enforces exact capability/target rules. It refuses c
 The HTTP layer authenticates before buffering the request body, enforces exact routes/methods/content type, limits body size, applies a request deadline and never reflects credentials or invalid payloads in errors. The Authenticator returns server-defined principals and roles; request JSON cannot assert either. Health output is intentionally minimal.
 
 No production listener is configured. Enabling a runnable Core requires a reviewed authenticator, loopback/private binding, Nginx TLS ingress, trusted-proxy rules and explicit network policy. Mock authenticators exist only in tests.
+
+The transitional Bearer adapter requires high-entropy credentials, stores SHA-256 digests, compares in constant time and rejects malformed or duplicate configuration. TLS is mandatory. Digest registries are sensitive configuration even though they are not raw credentials; they must never be committed or supplied to models.
+
+The network listener enforces loopback/private/unique-local binding. Its public API cannot construct a listener for an unspecified or public address.

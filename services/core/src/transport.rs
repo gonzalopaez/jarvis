@@ -10,7 +10,11 @@ use http::{
 use http_body::Body;
 use http_body_util::{BodyExt, Full, Limited};
 use serde::Serialize;
-use std::{sync::Arc, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 #[cfg(feature = "network-server")]
 use hyper::{body::Incoming, server::conn::http1, service::service_fn};
@@ -20,6 +24,9 @@ use hyper_util::rt::TokioIo;
 use std::convert::Infallible;
 #[cfg(feature = "network-server")]
 use tokio::net::TcpListener;
+
+#[cfg(feature = "network-server")]
+pub struct PrivateListener(TcpListener);
 
 pub const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024;
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -43,6 +50,9 @@ impl Default for TransportConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuthError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BindAddressError;
 
 pub trait Authenticator: Send + Sync + 'static {
     fn authenticate(&self, credential: Option<&str>) -> Result<AuthContext, AuthError>;
@@ -185,8 +195,32 @@ where
 }
 
 #[cfg(feature = "network-server")]
+#[cfg(feature = "network-server")]
+pub async fn bind_private(address: SocketAddr) -> std::io::Result<PrivateListener> {
+    validate_bind_address(address).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "JARVIS Core may bind only to loopback or private addresses",
+        )
+    })?;
+    TcpListener::bind(address).await.map(PrivateListener)
+}
+
+pub fn validate_bind_address(address: SocketAddr) -> Result<(), BindAddressError> {
+    let allowed = match address.ip() {
+        IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
+        IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local(),
+    };
+    if allowed {
+        Ok(())
+    } else {
+        Err(BindAddressError)
+    }
+}
+
+#[cfg(feature = "network-server")]
 pub async fn serve<E, A, U>(
-    listener: TcpListener,
+    listener: PrivateListener,
     transport: Transport<E, A, U>,
 ) -> std::io::Result<()>
 where
@@ -194,6 +228,7 @@ where
     A: AuditSink + Send + Sync + 'static,
     U: Authenticator,
 {
+    let listener = listener.0;
     loop {
         let (stream, _) = listener.accept().await?;
         let io = TokioIo::new(stream);

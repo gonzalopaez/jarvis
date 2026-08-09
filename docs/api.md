@@ -34,4 +34,8 @@ Other paths return 404 and other methods return 405 with an Allow header. Core r
 
 The transport has a request deadline that currently protects asynchronous body receipt and routing. Executors are synchronous and mock-only in this phase; a future network executor must use an async or isolated bounded execution model so blocking work cannot bypass deadlines.
 
-The optional Hyper listener accepts a caller-provided bound socket. There is deliberately no executable, default address, CORS policy, trusted-proxy policy or TLS configuration yet. Production traffic will terminate TLS at the internal Nginx gateway; direct public binding is prohibited.
+The optional Hyper listener is created only through the private bind validator. There is deliberately no executable, default address, CORS policy, trusted-proxy policy or TLS configuration yet. Production traffic will terminate TLS at the internal Nginx gateway; direct public binding is prohibited.
+
+The listener API now requires a validated private listener. Loopback, RFC1918 IPv4 and IPv6 unique-local addresses are accepted; unspecified and public addresses fail closed.
+
+The initial real Authenticator maps hashed opaque Bearer credentials to server-owned subjects and roles. Request payloads cannot provide identity. See authentication.md for lifecycle requirements and migration direction.

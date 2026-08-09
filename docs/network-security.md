@@ -9,3 +9,5 @@
 - Public exposure requires a separate decision, threat review and narrowly scoped firewall/reverse-proxy change.
 
 This repository does not configure AdGuard, Nginx, certificates or firewalls.
+
+Jarvis Core code additionally denies binding to unspecified or public addresses. The supported boundary is loopback, RFC1918 IPv4 or IPv6 unique-local. This is defense in depth and does not replace VM/LXC firewall rules or Nginx TLS policy.
