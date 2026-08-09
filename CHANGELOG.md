@@ -9,6 +9,7 @@ All notable changes follow Keep a Changelog principles and semantic versioning.
 - Versioned Core request, response and sanitized audit-event schemas.
 - Deny-by-default Core policy engine, authentication boundary and restricted executor contract.
 - Security tests for validation, authorization, execution verification and audit behavior.
+- Minimal Hyper transport with exact routes, opaque authentication, bounded bodies, deadlines and sanitized errors.
 
 ## [0.1.0-clean] - 2026-08-08
 
