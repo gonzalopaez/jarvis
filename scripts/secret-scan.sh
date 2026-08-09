@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if ! command -v rg >/dev/null 2>&1; then
-  printf '%s\n' 'ERROR|ripgrep is required for the repository secret scan'
+if ! command -v git >/dev/null 2>&1; then
+  printf '%s\n' 'ERROR|git is required for the repository secret scan'
   exit 2
 fi
 
@@ -14,13 +14,13 @@ scan() {
   local matches
 
   matches="$(
-    rg -I -l --hidden \
-      --glob '!.git/**' \
-      --glob '!**/node_modules/**' \
-      --glob '!**/dist/**' \
-      --glob '!**/target/**' \
-      --glob '!scripts/secret-scan.sh' \
-      -e "$pattern" . 2>/dev/null || true
+    git grep -I -l -E -e "$pattern" -- \
+      . \
+      ':(exclude)scripts/secret-scan.sh' \
+      ':(exclude)**/node_modules/**' \
+      ':(exclude)**/dist/**' \
+      ':(exclude)**/target/**' \
+      2>/dev/null || true
   )"
 
   if [[ -n "$matches" ]]; then
