@@ -28,6 +28,8 @@ logs/
 *.mp3
 *.ogg
 .cache/
+__pycache__/
+*.py[cod]
 
 # Editors and operating systems
 .vscode/

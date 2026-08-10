@@ -5,15 +5,18 @@ import type { AgentAdapter, AgentTaskEvent, AgentTaskRequest } from "../core/con
 export class MockAgentAdapter {
   constructor(private readonly store: JarvisStore) {}
 
-  trigger(state: JarvisState): void {
-    this.store.setState(state, true);
+  trigger(state: JarvisState, context?: string): void {
+    this.store.setState(state, true, context);
+    if (["listening", "thinking", "routing", "executing", "speaking"].includes(state)) {
+      this.store.setDevAudioLevel(state === "speaking" ? .82 : state === "listening" ? .68 : .3);
+    } else {
+      this.store.clearAudioLevel();
+    }
     const messages: Partial<Record<JarvisState, [string, string]>> = {
       listening: ["Listening for operator input.", "Voice channel open."],
       thinking: ["Analyze current system conditions.", "Processing available context."],
       routing: ["Route request to the appropriate module.", "Intent classified and routed."],
-      "codex-analyzing": ["Investigate the requested system issue.", "Codex mock analysis in progress."],
-      "codex-executing": ["Apply the approved change.", "Codex mock execution active."],
-      "n8n-executing": ["Execute the selected workflow.", "n8n mock workflow active."],
+      executing: ["Apply the approved change.", "Simulated execution active."],
       speaking: ["Report the result.", "All systems responding within expected parameters."],
       warning: ["Review the active warning.", "Operator attention is advised."],
       "authorization-required": ["Authorize a protected operation.", "Execution paused pending operator approval."],

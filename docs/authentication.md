@@ -4,7 +4,7 @@
 
 The transitional Bearer adapter accepts high-entropy opaque credentials and stores only their SHA-256 digests in process memory. Each digest is configured with one server-owned subject and a fixed role set. Request JSON cannot provide or override identity or roles.
 
-Credential records are supplied programmatically to Core. This repository contains no production values, digest registry or credential file format. A production bootstrap mechanism will be designed with OpenBao rather than inferred here.
+Credential records are loaded at startup from a bounded systemd credential named `auth-registry.json`. Its strict JSON envelope contains a `credentials` array; each entry has only `sha256`, `subject` and `roles`. The source file is sensitive operational configuration and is never committed. Raw Bearer values are prohibited from this registry. OpenBao will replace this bootstrap lifecycle rather than becoming model-visible configuration.
 
 Bearer-token credentials must:
 
@@ -13,6 +13,18 @@ Bearer-token credentials must:
 - be transmitted only over TLS;
 - be independently scoped, rotated and revocable;
 - remain outside prompts, model context, URLs, logs, traces and error output.
+
+The Desktop loads its Core credential only in the native Tauri backend from `JARVIS_CORE_TOKEN_FILE`. JavaScript receives neither the value nor the file path; it can invoke only the narrow health and conversation commands.
+
+## Browser authentication boundary
+
+The Web UI never reads the transitional Bearer credential. Phase 2 exposes aggregate health without authentication and keeps `/api/v1/agents` and `/api/v1/requests` protected by the server Authenticator. Browser calls to protected routes therefore fail closed until a reviewed identity flow issues a short-lived server-side session.
+
+The Core now provides an in-memory bounded Session Store for a future trusted identity adapter. It issues 256-bit opaque identifiers, stores only their SHA-256 digests, limits TTL to 24 hours, supports revocation and returns cookies with `Secure`, `HttpOnly`, `SameSite=Strict` and a scoped path. Session state maps to a server-owned Principal; roles cannot come from browser JSON.
+
+Session-authenticated writes require both the exact configured Origin and a separate 256-bit CSRF token obtained from `GET /api/v1/session`. CSRF comparison is constant-time. The WebSocket uses the HttpOnly cookie automatically and still performs exact Origin validation.
+
+The internal Web UI can exchange an existing operator access key at `POST /api/v1/session`. The key is submitted once over same-origin HTTPS, validated against the digest-only server registry, cleared from the form immediately, and never placed in browser storage. The response sets an opaque `HttpOnly`, `Secure`, `SameSite=Strict` cookie. Session writes require the in-memory CSRF value returned by `GET /api/v1/session`; `DELETE /api/v1/session` revokes the concrete session. Nginx rate-limits the exchange and restricts this virtual host to the private network. OIDC or WebAuthn should replace this bootstrap exchange when a trusted identity provider is available. Sessions are intentionally lost on Core restart until a distributed/revocation-aware store is reviewed.
 
 The SHA-256 comparison is constant-time and all configured records are checked. Weak credentials remain vulnerable to offline guessing if a digest is disclosed, so digest configuration is sensitive and requires restricted filesystem/process access.
 

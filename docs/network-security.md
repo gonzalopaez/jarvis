@@ -8,6 +8,8 @@
 - Management planes and backend ports are not exposed to Desktop or the public Internet.
 - Public exposure requires a separate decision, threat review and narrowly scoped firewall/reverse-proxy change.
 
-This repository does not configure AdGuard, Nginx, certificates or firewalls.
+The repository carries the reviewed Core ingress fragment, but production AdGuard, certificate and firewall state remains operational configuration outside Git.
+
+The initial Core deployment uses the internal name `jarvis.d4rkn0d3.com`. AdGuard resolves it to the Nginx Proxy Manager workload, which terminates TLS with the existing wildcard certificate and forwards only to Core's private listener. Core's guest firewall accepts that application port only from Nginx Proxy Manager.
 
 Jarvis Core code additionally denies binding to unspecified or public addresses. The supported boundary is loopback, RFC1918 IPv4 or IPv6 unique-local. This is defense in depth and does not replace VM/LXC firewall rules or Nginx TLS policy.

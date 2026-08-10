@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/events/telemetry-snapshot.v1.schema.json",
+  "title": "JARVIS normalized operational telemetry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "timestamp_ms", "host", "kernel", "cpu_usage_percent", "memory_used_bytes",
+    "memory_total_bytes", "load_average", "filesystem_used_bytes",
+    "filesystem_total_bytes", "disk_read_bytes_per_second",
+    "disk_write_bytes_per_second", "network_receive_bytes_per_second",
+    "network_transmit_bytes_per_second", "uptime_seconds", "temperatures"
+  ],
+  "properties": {
+    "timestamp_ms": { "type": "integer", "minimum": 1 },
+    "host": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$" },
+    "kernel": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$" },
+    "cpu_usage_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+    "memory_used_bytes": { "type": "integer", "minimum": 0 },
+    "memory_total_bytes": { "type": "integer", "minimum": 1 },
+    "load_average": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "items": { "type": "number", "minimum": 0 }
+    },
+    "filesystem_used_bytes": { "type": "integer", "minimum": 0 },
+    "filesystem_total_bytes": { "type": "integer", "minimum": 1 },
+    "disk_read_bytes_per_second": { "type": "integer", "minimum": 0 },
+    "disk_write_bytes_per_second": { "type": "integer", "minimum": 0 },
+    "network_receive_bytes_per_second": { "type": "integer", "minimum": 0 },
+    "network_transmit_bytes_per_second": { "type": "integer", "minimum": 0 },
+    "uptime_seconds": { "type": "integer", "minimum": 0 },
+    "temperatures": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sensor", "celsius"],
+        "properties": {
+          "sensor": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$" },
+          "celsius": { "type": "number", "minimum": -50, "maximum": 200 }
+        }
+      }
+    }
+  }
+}

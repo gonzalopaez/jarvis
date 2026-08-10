@@ -1,0 +1,32 @@
+[Unit]
+Description=JARVIS Core security and policy gateway
+After=network-online.target nftables.service
+Wants=network-online.target
+Requires=nftables.service
+
+[Service]
+Type=simple
+User=jarvis-core
+Group=jarvis-core
+EnvironmentFile=/etc/jarvis-core/environment
+LoadCredential=auth-registry.json:/etc/jarvis-core/auth-registry.json
+LoadCredential=voice-service-token:/etc/jarvis-core/voice-service-token
+LoadCredential=litellm-token:/etc/jarvis-core/litellm-token
+LoadCredential=codex-service-token:/etc/jarvis-core/codex-service-token
+ExecStart=/usr/local/bin/jarvis-core
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+[Unit]
+Description=JARVIS read-only Wazuh alert relay
+After=network-online.target wazuh-manager.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=JARVIS_WAZUH_RELAY_TOKEN_FILE=/etc/jarvis-wazuh-relay/token
+ExecStart=/usr/bin/python3 /usr/local/lib/jarvis-wazuh-relay/jarvis_wazuh_relay.py
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/var/ossec/logs/alerts/alerts.json
+ReadWritePaths=/run
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,6 @@
 import { EventBus } from "./event-bus";
 import type { ActivityEvent, AppEvents, JarvisModel, JarvisState } from "./types";
+import { normalizeAudioLevel } from "../audio/source";
 
 export class JarvisStore {
   readonly bus = new EventBus<AppEvents>();
@@ -11,17 +12,22 @@ export class JarvisStore {
     telemetry: null,
     telemetryOnline: false,
     agents: [
-      { id: "codex", label: "CODEX CORE", state: "staged", detail: "MOCK ADAPTER", simulated: true },
-      { id: "voice", label: "VOICE ENGINE", state: "staged", detail: "STAGED", simulated: true },
-      { id: "n8n", label: "N8N", state: "staged", detail: "NOT CONNECTED", simulated: true },
-      { id: "memory", label: "MEMORY", state: "staged", detail: "STAGED", simulated: true },
-      { id: "monitor", label: "SYSTEM MONITOR", state: "active", detail: "INITIALIZING", simulated: false },
-      { id: "proxmox", label: "PROXMOX", state: "staged", detail: "FUTURE CONNECTOR", simulated: true },
+      { id: "core", label: "JARVIS CORE", state: "offline", detail: "CONNECTING", simulated: false },
+      { id: "codex", label: "CODEX CORE", state: "offline", detail: "NOT CONNECTED", simulated: false },
+      { id: "voice", label: "VOICE ENGINE", state: "offline", detail: "NOT CONNECTED", simulated: false },
+      { id: "memory", label: "MEMORY", state: "offline", detail: "NOT CONNECTED", simulated: false },
+      { id: "n8n", label: "N8N", state: "offline", detail: "NOT CONNECTED", simulated: false },
+      { id: "monitor", label: "SYSTEM MONITOR", state: "offline", detail: "INITIALIZING", simulated: false },
+      { id: "security", label: "SECURITY AGENT", state: "offline", detail: "NOT CONNECTED", simulated: false },
+      { id: "mcp", label: "MCP GATEWAY", state: "offline", detail: "NOT CONNECTED", simulated: false },
     ],
     activity: [],
     userTranscript: "Awaiting operator input.",
     jarvisTranscript: "Local system interface initialized.",
     developerControls: true,
+    audioVisualization: { source: "none", level: 0 },
+    securityTelemetry: null,
+    securityAlerts: [],
   };
 
   constructor() {
@@ -30,7 +36,7 @@ export class JarvisStore {
       this.model.telemetryOnline = true;
       const monitor = this.model.agents.find((agent) => agent.id === "monitor");
       if (monitor) {
-        monitor.state = "active";
+        monitor.state = "realtime";
         monitor.detail = "LIVE DATA";
       }
       this.publish();
@@ -39,10 +45,89 @@ export class JarvisStore {
       this.model.telemetryOnline = false;
       const monitor = this.model.agents.find((agent) => agent.id === "monitor");
       if (monitor) {
-        monitor.state = "warning";
+        monitor.state = "degraded";
         monitor.detail = "DATA LINK LOST";
       }
       this.addActivity("TELEMETRY", message, "error");
+    });
+    this.bus.on("telemetry.unavailable", ({ message }) => {
+      this.model.telemetryOnline = false;
+      const monitor = this.model.agents.find((agent) => agent.id === "monitor");
+      if (monitor) {
+        monitor.state = "offline";
+        monitor.detail = "REALTIME GATEWAY PENDING";
+        monitor.simulated = false;
+      }
+      this.addActivity("TELEMETRY", message, "info");
+    });
+    this.bus.on("core.health.updated", (health) => {
+      if (health.components) {
+        for (const component of health.components) {
+          const agent = this.model.agents.find((candidate) => candidate.id === component.id);
+          if (!agent) continue;
+          agent.state = component.agentStatus;
+          agent.detail = component.status === "healthy"
+            ? `${component.version.toUpperCase()} / ${component.latencyMs ?? health.latencyMs}MS`
+            : component.error?.toUpperCase() ?? component.status.toUpperCase();
+          agent.simulated = false;
+          if (component.latencyMs !== undefined) agent.latencyMs = component.latencyMs;
+          else delete agent.latencyMs;
+        }
+      } else {
+        const core = this.model.agents.find((agent) => agent.id === "core");
+        if (core) {
+          core.state = "ready";
+          core.detail = `TLS / ${health.apiVersion.toUpperCase()} / ${health.latencyMs}MS`;
+          core.latencyMs = health.latencyMs;
+        }
+      }
+      if (health.state && !["microphone", "tts"].includes(this.model.audioVisualization.source)) {
+        this.model.state = health.state;
+      }
+      this.publish();
+    });
+    this.bus.on("core.health.failed", ({ message }) => {
+      const core = this.model.agents.find((agent) => agent.id === "core");
+      if (core) {
+        core.state = "offline";
+        core.detail = "LINK UNAVAILABLE";
+        delete core.latencyMs;
+      }
+      this.addActivity("CORE", message, "error");
+    });
+    this.bus.on("realtime.connected", () => {
+      this.addActivity("REALTIME", "AUTHENTICATED WEBSOCKET CONNECTED", "success");
+    });
+    this.bus.on("realtime.unavailable", ({ reason }) => {
+      this.addActivity("REALTIME", reason, "warning");
+    });
+    this.bus.on("realtime.disconnected", ({ reason }) => {
+      this.addActivity("REALTIME", reason, "warning");
+    });
+    this.bus.on("realtime.resync.required", () => {
+      this.addActivity("REALTIME", "SNAPSHOT RESYNCHRONIZATION REQUIRED", "warning");
+    });
+    this.bus.on("realtime.state.changed", ({ state }) => this.setState(state));
+    this.bus.on("realtime.agent.changed", (component) => {
+      const agent = this.model.agents.find((candidate) => candidate.id === component.id);
+      if (!agent) return;
+      agent.state = component.agentStatus;
+      agent.detail = component.error?.toUpperCase() ?? component.status.toUpperCase();
+      agent.simulated = false;
+      this.publish();
+    });
+    this.bus.on("realtime.activity", ({ component, message, severity }) => {
+      this.addActivity(component, message, severity);
+    });
+    this.bus.on("voice.input.level", ({ level }) => this.setAudioLevel("microphone", level));
+    this.bus.on("voice.output.level", ({ level }) => this.setAudioLevel("tts", level));
+    this.bus.on("security.telemetry.updated", (snapshot) => {
+      this.model.securityTelemetry = snapshot;
+      this.publish();
+    });
+    this.bus.on("security.alert", (alert) => {
+      this.model.securityAlerts = [alert, ...this.model.securityAlerts.filter((item) => item.id !== alert.id)].slice(0, 50);
+      this.addActivity("SECURITY", alert.title, alert.severity === "critical" || alert.severity === "high" ? "error" : "warning");
     });
   }
 
@@ -56,14 +141,15 @@ export class JarvisStore {
     return () => this.subscribers.delete(listener);
   }
 
-  setState(state: JarvisState, simulated = false): void {
-    if (state === this.model.state) return;
+  setState(state: JarvisState, simulated = false, operationContext?: string): void {
+    if (state === this.model.state && operationContext === this.model.operationContext) return;
     const previous = this.model.state;
     this.model.state = state;
-    this.updateAgentForState(state);
+    if (operationContext) this.model.operationContext = operationContext;
+    else delete this.model.operationContext;
     this.bus.emit("state.changed", { state, previous });
     this.addActivity(
-      state.startsWith("codex") ? "CODEX" : state.startsWith("n8n") ? "N8N" : "JARVIS",
+      "JARVIS",
       `STATE CHANGED: ${state.toUpperCase().replace(/-/g, " ")}`,
       state === "error" ? "error" : state.includes("warning") || state.includes("authorization") ? "warning" : "info",
       simulated,
@@ -80,6 +166,20 @@ export class JarvisStore {
 
   toggleDeveloperControls(): void {
     this.model.developerControls = !this.model.developerControls;
+    this.publish();
+  }
+
+  setDevAudioLevel(level: number): void {
+    this.setAudioLevel("dev", level);
+  }
+
+  clearAudioLevel(): void {
+    this.model.audioVisualization = { source: "none", level: 0 };
+    this.publish();
+  }
+
+  private setAudioLevel(source: "microphone" | "tts" | "dev", level: number): void {
+    this.model.audioVisualization = { source, level: normalizeAudioLevel(level) };
     this.publish();
   }
 
@@ -100,19 +200,6 @@ export class JarvisStore {
     this.model.activity = [activity, ...this.model.activity].slice(0, 28);
     this.bus.emit("activity.created", activity);
     this.publish();
-  }
-
-  private updateAgentForState(state: JarvisState): void {
-    const codex = this.model.agents.find((agent) => agent.id === "codex");
-    const n8n = this.model.agents.find((agent) => agent.id === "n8n");
-    if (codex) {
-      codex.state = state.startsWith("codex") ? "active" : "staged";
-      codex.detail = state.startsWith("codex") ? state.split("-")[1].toUpperCase() : "MOCK ADAPTER";
-    }
-    if (n8n) {
-      n8n.state = state === "n8n-executing" ? "active" : "staged";
-      n8n.detail = state === "n8n-executing" ? "EXECUTING / MOCK" : "NOT CONNECTED";
-    }
   }
 
   private publish(): void {

@@ -3,6 +3,69 @@ use serde_json::{Map, Value};
 
 pub const API_VERSION: &str = "v1";
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationalHealth {
+    Healthy,
+    Degraded,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum JarvisState {
+    Idle,
+    Listening,
+    Thinking,
+    Routing,
+    Executing,
+    Speaking,
+    AuthorizationRequired,
+    Warning,
+    Error,
+    Offline,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentHealthStatus {
+    Realtime,
+    Ready,
+    Busy,
+    Degraded,
+    Error,
+    Offline,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ComponentHealth {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub status: OperationalHealth,
+    pub agent_status: AgentHealthStatus,
+    pub version: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SystemHealth {
+    pub api_version: &'static str,
+    pub status: OperationalHealth,
+    pub state: JarvisState,
+    pub components: Vec<ComponentHealth>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AgentsResponse {
+    pub api_version: &'static str,
+    pub agents: Vec<ComponentHealth>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Principal {
     pub subject: String,

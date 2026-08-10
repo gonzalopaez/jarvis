@@ -5,6 +5,9 @@ Version v1 is defined by JSON Schema:
 - core-request.v1.schema.json
 - core-response.v1.schema.json
 - transport-error.v1.schema.json
+- system-health.v1.schema.json
+- agents-response.v1.schema.json
+- session-status.v1.schema.json
 
 Unknown fields are rejected. Conversation and action requests are mutually exclusive. Correlation IDs are caller-generated opaque identifiers with a restricted character set. Authentication is transport metadata and never part of the JSON body.
 

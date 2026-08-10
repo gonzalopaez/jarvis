@@ -1,6 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { EventBus } from "../core/event-bus";
 import type { AppEvents, TelemetrySnapshot } from "../core/types";
+import type { JarvisRuntimeClient } from "../runtime/client";
 
 export class TelemetryClient {
   private timer: number | null = null;
@@ -8,11 +8,18 @@ export class TelemetryClient {
 
   constructor(
     private readonly bus: EventBus<AppEvents>,
+    private readonly runtime: JarvisRuntimeClient,
     private readonly intervalMs = 1200,
   ) {}
 
   start(): void {
     if (this.timer !== null) return;
+    if (this.runtime.kind === "browser") {
+      this.bus.emit("telemetry.unavailable", {
+        message: "SERVER TELEMETRY AWAITING REALTIME GATEWAY",
+      });
+      return;
+    }
     void this.poll();
     this.timer = window.setInterval(() => void this.poll(), this.intervalMs);
   }
@@ -26,7 +33,7 @@ export class TelemetryClient {
     if (this.polling) return;
     this.polling = true;
     try {
-      const snapshot = await invoke<TelemetrySnapshot>("get_system_telemetry");
+      const snapshot: TelemetrySnapshot = await this.runtime.telemetry();
       this.bus.emit("telemetry.updated", snapshot);
     } catch (error) {
       this.bus.emit("telemetry.failed", { message: String(error) });

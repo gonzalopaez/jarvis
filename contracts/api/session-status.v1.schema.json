@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/api/session-status.v1.schema.json",
+  "title": "JARVIS browser session status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "authenticated", "csrf_token"],
+  "properties": {
+    "api_version": { "const": "v1" },
+    "authenticated": { "const": true },
+    "csrf_token": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

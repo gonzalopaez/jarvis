@@ -19,3 +19,5 @@ No production listener is configured. Enabling a runnable Core requires a review
 The transitional Bearer adapter requires high-entropy credentials, stores SHA-256 digests, compares in constant time and rejects malformed or duplicate configuration. TLS is mandatory. Digest registries are sensitive configuration even though they are not raw credentials; they must never be committed or supplied to models.
 
 The network listener enforces loopback/private/unique-local binding. Its public API cannot construct a listener for an unspecified or public address.
+
+The Phase 1 Web UI uses only same-origin routes and receives no Bearer value or credential path. Its browser adapter can access minimal unauthenticated health but fails closed for conversations and telemetry until authenticated server-side sessions and the realtime gateway are implemented. A reverse proxy must not inject one shared application credential on behalf of every browser user.

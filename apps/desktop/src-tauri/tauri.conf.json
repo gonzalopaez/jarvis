@@ -22,7 +22,7 @@
         "maximized": false,
         "decorations": false,
         "resizable": true,
-        "fullscreen": true,
+        "fullscreen": false,
         "backgroundColor": "#02070b"
       }
     ],
