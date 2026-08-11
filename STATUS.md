@@ -25,15 +25,29 @@ Verified on the real LiteLLM instance (192.168.1.11:4000, CT116, Ollama-backed):
 - **Scoped virtual key issued.** `n8n-soc-triage`: models restricted to
   `jarvis-soc-l1`/`l2`, `max_budget` 5 / 24h, `rpm_limit` 60. Verified it is
   rejected (401) when calling an out-of-scope model. Key stored root-only at
-  `/etc/litellm/n8n-soc-triage.key` on CT116; NOT in git. Destined for the n8n
-  credential store (or OpenBao).
+  `/etc/litellm/n8n-soc-triage.key` on CT116 and encrypted in n8n's credential
+  store; NOT in git.
+- **Embeddings key repaired and isolated.** The inherited generic bearer token
+  was invalid. `n8n-soc-embeddings` is restricted to `nomic-embed-text`, with
+  `max_budget` 2 / 24h and `rpm_limit` 60, and is attached only to the RAG
+  embeddings node.
+- **n8n workflow active and tested.** `SOC 2.0` was backed up before import,
+  patched in place (workflow ID preserved), published and tested with synthetic
+  L1 and L2 alerts. L1 execution `2333` completed with schema-valid JSON. L2
+  execution `2338` completed end to end through Wazuh enrichment, LiteLLM,
+  `Parse L2 + Extract Actions`, Telegram branches and Qdrant persistence.
+  The L2 parser reported `needsReview=false`, no `PARSE_ERROR`, populated
+  `veredicto` / `confianza` / `actions.proposed`, and kept
+  `ACTION_ENABLED=false`.
+- **Pre-existing workflow defects repaired.** The stale LiteLLM embeddings
+  token, missing Wazuh API credential reference and incorrect Qdrant
+  `POST /points` method were replaced with scoped credentials and the correct
+  `PUT` upsert. Credentials remain only in n8n's encrypted store.
 - **Core unaffected.** No change to `services/core/src`; after the LiteLLM
   restart, Core and Codex report `READY` and `jarvis-fast` still responds.
 
 ### Not yet done / known gaps
 
-- **n8n workflow reimport is pending**: the patched workflow file
-  (`SOC_2_0_patched.json`) was not available, so the workflow was not touched.
 - **`jarvis-reasoning` is not defined** on the live LiteLLM, although
   `services/core/src/voice.rs` references it. Pre-existing gap; left as-is to
   avoid touching Core routing in this task.

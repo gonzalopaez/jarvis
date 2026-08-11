@@ -7,10 +7,10 @@ in caller code.
 ## What is active
 
 - **Conversation routing** — `services/core/src/voice.rs` calls LiteLLM through
-  named aliases (`jarvis-fast`, `jarvis-reasoning`) rather than physical model
-  names. This path is live.
+  named aliases rather than physical model names. `jarvis-fast` is live;
+  `jarvis-reasoning` is referenced by Core but remains a known deployment gap.
 - **SOC triage aliases** — `jarvis-soc-l1` and `jarvis-soc-l2` (ADR-012) are the
-  new addition, consumed by the n8n "SOC 2.0" workflow for L1/L2 alert triage.
+  consumed by the active n8n "SOC 2.0" workflow for L1/L2 alert triage.
   They require structured output against
   `contracts/api/security-verdict.v1.schema.json`, replacing the workflow's
   previous free-text regex parsing.
@@ -23,12 +23,15 @@ in caller code.
 
 ## config.yaml
 
-`config.yaml` is a **sanitized reference**: no real keys, no hosts beyond the
-documented internal addresses. The master key, database URL and per-consumer
-virtual keys are provisioned through environment / OpenBao and issued via
-LiteLLM's `/key/generate` API — never committed here. Each consumer
-(`core-conversation`, `n8n-soc-triage`) gets its own budgeted, rate-limited
-virtual key so one runaway consumer cannot exhaust another's budget.
+`config.yaml` is a **sanitized desired-state reference**, not a complete copy of
+the live server configuration. It must be merged with the deployed model list;
+replacing the live file verbatim would remove unrelated aliases. Master keys,
+database URLs and consumer keys are never committed.
+
+n8n uses separate budgeted, rate-limited keys for chat triage
+(`n8n-soc-triage`, restricted to `jarvis-soc-l1/l2`) and embeddings
+(`n8n-soc-embeddings`, restricted to `nomic-embed-text`). This preserves least
+privilege while allowing the workflow's RAG pre-filter to operate.
 
 See `STATUS.md` at the repo root for what is verified against the running
 LiteLLM instance.

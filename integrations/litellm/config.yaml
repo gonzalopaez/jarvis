@@ -1,8 +1,9 @@
 # integrations/litellm/config.yaml
 #
-# Sanitized example. No real keys, hosts beyond documented internal addresses,
-# or production secrets belong in this file — same rule as every other
-# committed config in this repo (see integrations/litellm/README.md).
+# Sanitized desired-state fragment. Merge model_list entries into the live
+# configuration; do not replace the complete deployed config with this file,
+# because the server also carries unrelated aliases. No production secrets
+# belong here (see integrations/litellm/README.md).
 #
 # Master key, database URL and per-consumer virtual keys are provisioned via
 # environment / OpenBao, never written here.
@@ -58,3 +59,7 @@ litellm_settings:
 # The response key goes into n8n's credential store (already the case for the
 # existing Ollama L1/L2 nodes — this ADR only scopes it to a dedicated,
 # budgeted virtual key instead of whatever shared token is used today).
+#
+# The embeddings node uses a separate `n8n-soc-embeddings` virtual key scoped
+# only to `nomic-embed-text`; a key restricted to the two chat aliases cannot
+# authorize `/v1/embeddings`.
