@@ -39,6 +39,11 @@ No provider, model, n8n, OpenBao, shell or infrastructure adapter is connected.
 
 The deployed executor is intentionally disabled. Health, governed conversation, telemetry and read-only security alert paths can be exercised, but no infrastructure action can execute until a capability-specific executor passes a separate review.
 
+Conversation can optionally retrieve reviewed infrastructure documentation
+from Qdrant before calling LiteLLM. This RAG path is read-only, bounded and
+fails open to ordinary conversation when retrieval is unavailable; it does not
+replace authenticated tools for live state. See `docs/adr/ADR-013-qdrant-infrastructure-rag.md`.
+
 WebSocket startup additionally requires `JARVIS_WEB_ORIGIN` as one exact HTTPS origin without a trailing slash. The gateway fails closed when missing, rejects anonymous or cross-origin upgrades and does not provide a browser authentication bypass.
 
 ## Test
