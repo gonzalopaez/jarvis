@@ -159,7 +159,13 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
         let service_down_query = service_context
             && contains_any(
                 &normalized,
-                &["caido", "caida", "no responde", "inaccesible", "fuera de linea"],
+                &[
+                    "caido",
+                    "caida",
+                    "no responde",
+                    "inaccesible",
+                    "fuera de linea",
+                ],
             );
         let domain_controller_query = normalized.contains("controlador de dominio")
             || normalized.contains("servidor de ce")
@@ -359,9 +365,9 @@ fn contains_any(value: &str, signals: &[&str]) -> bool {
 /// inside unrelated words. Tokens are normalized text split on whitespace;
 /// surrounding punctuation is trimmed before comparison.
 fn contains_word(tokens: &[&str], word: &str) -> bool {
-    tokens.iter().any(|token| {
-        token.trim_matches(|character: char| !character.is_alphanumeric()) == word
-    })
+    tokens
+        .iter()
+        .any(|token| token.trim_matches(|character: char| !character.is_alphanumeric()) == word)
 }
 
 fn looks_like_code(value: &str) -> bool {

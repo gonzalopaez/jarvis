@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/api/security-verdict.v1.schema.json",
+  "title": "SOC triage verdict v1",
+  "description": "Structured output required from jarvis-soc-l1 and jarvis-soc-l2 via LiteLLM response_format. Replaces free-text parsing in n8n. proposed_actions items use the SAME capability/target vocabulary as contracts/api/core-request.v1.schema.json#/$defs/action so a verdict can be forwarded to Core's action endpoint without translation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "confidence", "justification"],
+  "properties": {
+    "verdict": {
+      "enum": ["FALSO_POSITIVO", "AMENAZA_REAL_BAJA", "AMENAZA_REAL_MEDIA", "AMENAZA_REAL_ALTA"]
+    },
+    "confidence": {
+      "enum": ["ALTA", "MEDIA", "BAJA"]
+    },
+    "justification": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Technical justification citing concrete log/context data. No text outside this schema is accepted."
+    },
+    "iocs": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": { "enum": ["ip", "user", "hash", "process", "file", "domain"] },
+          "value": { "type": "string", "minLength": 1, "maxLength": 256 }
+        }
+      }
+    },
+    "proposed_actions": {
+      "type": "array",
+      "maxItems": 5,
+      "description": "Each item is a candidate Core action. It is NEVER auto-executed: n8n forwards it to Core as kind=\"action\", where PolicyEngine + the (currently disabled) RestrictedExecutor decide, exactly like any other action request.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capability", "target", "parameters"],
+        "properties": {
+          "capability": {
+            "enum": [
+              "security.user.disable",
+              "security.ip.block",
+              "security.host.isolate"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z0-9_.:-]+$",
+            "description": "Agent/host identifier, matching core-request.v1 target pattern."
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "user": { "type": "string", "maxLength": 128 },
+              "ip": { "type": "string", "maxLength": 45 },
+              "reason": { "type": "string", "maxLength": 500 }
+            }
+          }
+        }
+      }
+    },
+    "tuning_suggestion": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Optional: suggested rule tuning to reduce future false positives. Informational only, never auto-applied."
+    }
+  }
+}

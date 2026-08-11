@@ -1,0 +1,65 @@
+# integrations/litellm/config.yaml
+#
+# Sanitized desired-state fragment. Merge model_list entries into the live
+# configuration; do not replace the complete deployed config with this file,
+# because the server also carries unrelated aliases. No production secrets
+# belong here (see integrations/litellm/README.md).
+#
+# Master key, database URL and per-consumer virtual keys are provisioned via
+# environment / OpenBao, never written here.
+
+model_list:
+  # --- Existing conversation routing (docs/ai-routing.md), now committed as
+  #     actual config instead of only living implicitly in services/core. ---
+  - model_name: jarvis-fast
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: http://127.0.0.1:11434
+
+  - model_name: jarvis-reasoning
+    litellm_params:
+      model: ollama/qwen2.5
+      api_base: http://127.0.0.1:11434
+
+  # --- New: SOC triage aliases (ADR-012). Physical model choice can change
+  #     here without touching the n8n workflow. ---
+  - model_name: jarvis-soc-l1
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: http://127.0.0.1:11434
+      temperature: 0.1
+
+  - model_name: jarvis-soc-l2
+    litellm_params:
+      model: ollama/qwen2.5
+      api_base: http://127.0.0.1:11434
+      temperature: 0.05
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/LITELLM_DATABASE_URL   # required for virtual-key issuance/budgets
+
+litellm_settings:
+  drop_params: true   # ignore provider-unsupported params instead of erroring
+  json_logs: true
+
+# --- Virtual keys (issued via LiteLLM's /key/generate API, not this file) ---
+#
+# curl -X POST http://192.168.1.11:4000/key/generate \
+#   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+#   -H "Content-Type: application/json" \
+#   -d '{
+#         "key_alias": "n8n-soc-triage",
+#         "models": ["jarvis-soc-l1", "jarvis-soc-l2"],
+#         "max_budget": 5,
+#         "budget_duration": "24h",
+#         "rpm_limit": 60
+#       }'
+#
+# The response key goes into n8n's credential store (already the case for the
+# existing Ollama L1/L2 nodes — this ADR only scopes it to a dedicated,
+# budgeted virtual key instead of whatever shared token is used today).
+#
+# The embeddings node uses a separate `n8n-soc-embeddings` virtual key scoped
+# only to `nomic-embed-text`; a key restricted to the two chat aliases cannot
+# authorize `/v1/embeddings`.

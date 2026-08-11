@@ -179,6 +179,7 @@ async fn versioned_request_route_preserves_the_core_contract() {
     assert_eq!(body_json(response).await["data"]["mode"], "mock");
 }
 
+#[cfg(feature = "network-server")]
 fn websocket_request(credential: Option<&str>, origin: Option<&str>) -> Request<Full<Bytes>> {
     let mut builder = Request::builder()
         .uri("/ws")
@@ -213,6 +214,7 @@ fn websocket_transport(
     )
 }
 
+#[cfg(feature = "network-server")]
 #[tokio::test]
 async fn websocket_requires_authentication_and_configured_exact_origin() {
     let anonymous = websocket_transport(Some("https://jarvis.example.internal"))
@@ -248,6 +250,7 @@ async fn websocket_requires_authentication_and_configured_exact_origin() {
     assert_eq!(accepted.status(), StatusCode::SWITCHING_PROTOCOLS);
 }
 
+#[cfg(feature = "network-server")]
 #[tokio::test]
 async fn voice_websocket_requires_session_and_exact_origin() {
     let transport = websocket_transport(Some("https://jarvis.example.internal"));
@@ -276,6 +279,7 @@ async fn voice_websocket_requires_session_and_exact_origin() {
     );
 }
 
+#[cfg(feature = "network-server")]
 #[tokio::test]
 async fn opaque_session_cookie_authenticates_api_and_websocket() {
     let transport = websocket_transport(Some("https://jarvis.example.internal"));
@@ -469,6 +473,7 @@ async fn unsupported_content_type_is_rejected() {
     assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
 }
 
+#[cfg(feature = "network-server")]
 #[tokio::test]
 async fn alert_audio_requires_csrf_for_cookie_sessions_and_json_for_bearer() {
     let transport = websocket_transport(Some("https://jarvis.example.internal"));
@@ -526,6 +531,7 @@ async fn alert_audio_requires_csrf_for_cookie_sessions_and_json_for_bearer() {
     );
 }
 
+#[cfg(feature = "network-server")]
 #[tokio::test]
 async fn alert_audio_rejects_declared_oversized_bodies_before_voice_dispatch() {
     let request = Request::builder()
