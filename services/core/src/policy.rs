@@ -35,6 +35,7 @@ pub enum AuthorizationError {
     CapabilityDenied,
     RoleNotAuthorized,
     AuthorizationNotRequired,
+    ConfirmationRequired,
     ResourceIdentifierMismatch,
     RollbackPlanRequired,
     GrantCapacityReached,
@@ -178,7 +179,11 @@ impl PolicyEngine {
         }
         match &rule.authorization {
             AuthorizationConfig::None => return Err(AuthorizationError::AuthorizationNotRequired),
-            AuthorizationConfig::SingleGrant { .. } => {}
+            AuthorizationConfig::SingleGrant { .. } => {
+                if resource_identifier != Some("approve") {
+                    return Err(AuthorizationError::ConfirmationRequired);
+                }
+            }
             AuthorizationConfig::TypedConfirmation { required_field, .. } => {
                 if resource_identifier != Some(action.target.as_str()) {
                     return Err(AuthorizationError::ResourceIdentifierMismatch);

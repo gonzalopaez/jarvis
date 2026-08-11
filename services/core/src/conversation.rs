@@ -572,6 +572,7 @@ mod tests {
             kind: "conversation".into(),
             message: Some(message.into()),
             action: None,
+            authorization: None,
         }
     }
 

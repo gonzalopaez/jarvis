@@ -1,6 +1,7 @@
 use crate::{
-    validate_request, ApiError, AuditEvent, AuditSink, AuthContext, CoreRequest, CoreResponse,
-    Decision, PolicyEngine, ResponseStatus, RestrictedExecutor, API_VERSION,
+    validate_request, ApiError, AuditEvent, AuditSink, AuthContext, AuthorizationError,
+    CoreRequest, CoreResponse, Decision, PolicyEngine, ResponseStatus, RestrictedExecutor,
+    API_VERSION,
 };
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -74,7 +75,34 @@ where
             .action
             .as_ref()
             .expect("validated action request must contain action");
-        match self.policy.evaluate(principal, action) {
+        let decision = if let Some(authorization) = &request.authorization {
+            if let Err(error) = self.policy.authorize(
+                principal,
+                action,
+                &request.session_id,
+                Some(&authorization.confirmation),
+                authorization.rollback_plan.as_deref(),
+            ) {
+                self.audit(
+                    &audit_id,
+                    &request,
+                    &principal.subject,
+                    "authorization_denied",
+                );
+                return response(
+                    request,
+                    audit_id,
+                    ResponseStatus::Denied,
+                    None,
+                    Some(authorization_error(error)),
+                );
+            }
+            self.policy
+                .evaluate_with_grant(principal, action, &request.session_id)
+        } else {
+            self.policy.evaluate(principal, action)
+        };
+        match decision {
             Decision::Deny { reason } => {
                 self.audit(&audit_id, &request, &principal.subject, "denied");
                 response(
@@ -151,6 +179,39 @@ where
             target: request.action.as_ref().map(|action| action.target.clone()),
             outcome,
         });
+    }
+}
+
+fn authorization_error(error: AuthorizationError) -> ApiError {
+    match error {
+        AuthorizationError::CapabilityDenied => ApiError {
+            code: "CAPABILITY_DENIED",
+            message: "Action is not permitted",
+        },
+        AuthorizationError::RoleNotAuthorized => ApiError {
+            code: "ROLE_NOT_AUTHORIZED",
+            message: "Only an authorized human may grant this action",
+        },
+        AuthorizationError::AuthorizationNotRequired => ApiError {
+            code: "AUTHORIZATION_NOT_REQUIRED",
+            message: "This action does not accept an authorization grant",
+        },
+        AuthorizationError::ConfirmationRequired => ApiError {
+            code: "CONFIRMATION_REQUIRED",
+            message: "The exact confirmation value is required",
+        },
+        AuthorizationError::ResourceIdentifierMismatch => ApiError {
+            code: "RESOURCE_IDENTIFIER_MISMATCH",
+            message: "Confirmation does not match the exact resource identifier",
+        },
+        AuthorizationError::RollbackPlanRequired => ApiError {
+            code: "ROLLBACK_PLAN_REQUIRED",
+            message: "A non-empty rollback plan is required",
+        },
+        AuthorizationError::GrantCapacityReached => ApiError {
+            code: "AUTHORIZATION_UNAVAILABLE",
+            message: "Authorization capacity is unavailable",
+        },
     }
 }
 

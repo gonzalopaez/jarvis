@@ -1007,6 +1007,7 @@ async fn process_routed_voice(
         kind: "conversation".into(),
         message: Some(transcript.clone()),
         action: None,
+        authorization: None,
     };
     let response = conversation.handle(&request).await;
     if response.status != ResponseStatus::Completed {

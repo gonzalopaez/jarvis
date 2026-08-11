@@ -28,9 +28,9 @@ pub use codex::{
     UnavailableCodexService,
 };
 pub use contracts::{
-    ActionRequest, AgentHealthStatus, AgentsResponse, ApiError, AuthContext, ComponentHealth,
-    CoreRequest, CoreResponse, JarvisState, OperationalHealth, Principal, ResponseStatus,
-    SystemHealth, API_VERSION,
+    ActionRequest, AgentHealthStatus, AgentsResponse, ApiError, AuthContext,
+    AuthorizationSubmission, ComponentHealth, CoreRequest, CoreResponse, JarvisState,
+    OperationalHealth, Principal, ResponseStatus, SystemHealth, API_VERSION,
 };
 #[cfg(feature = "network-server")]
 pub use conversation::{CodexClientError, CodexHttpClient, ConversationService};
