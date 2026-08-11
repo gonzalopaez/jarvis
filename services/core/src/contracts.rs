@@ -106,6 +106,14 @@ pub struct CoreRequest {
     pub kind: String,
     pub message: Option<String>,
     pub action: Option<ActionRequest>,
+    pub authorization: Option<AuthorizationSubmission>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizationSubmission {
+    pub confirmation: String,
+    pub rollback_plan: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

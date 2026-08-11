@@ -28,7 +28,7 @@ pub fn validate_request(request: &CoreRequest) -> Result<(), ValidationError> {
 
     match request.kind.as_str() {
         "conversation" => {
-            if request.action.is_some() {
+            if request.action.is_some() || request.authorization.is_some() {
                 return Err(error("INVALID_REQUEST_SHAPE"));
             }
             let message = request
@@ -56,6 +56,17 @@ pub fn validate_request(request: &CoreRequest) -> Result<(), ValidationError> {
                 return Err(error("PARAMETERS_TOO_LARGE"));
             }
             inspect_value(&Value::Object(action.parameters.clone()), 0)?;
+            if let Some(authorization) = &request.authorization {
+                if authorization.confirmation.trim().is_empty()
+                    || authorization.confirmation.len() > MAX_FIELD_BYTES
+                    || authorization
+                        .rollback_plan
+                        .as_ref()
+                        .is_some_and(|plan| plan.trim().is_empty() || plan.len() > 2_000)
+                {
+                    return Err(error("INVALID_AUTHORIZATION"));
+                }
+            }
         }
         _ => return Err(error("UNKNOWN_REQUEST_KIND")),
     }

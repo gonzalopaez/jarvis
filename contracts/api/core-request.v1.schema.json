@@ -11,13 +11,14 @@
     "session_id": { "$ref": "#/$defs/correlationId" },
     "kind": { "enum": ["conversation", "action"] },
     "message": { "type": "string", "minLength": 1, "maxLength": 8000 },
-    "action": { "$ref": "#/$defs/action" }
+    "action": { "$ref": "#/$defs/action" },
+    "authorization": { "$ref": "#/$defs/authorization" }
   },
   "oneOf": [
     {
       "properties": { "kind": { "const": "conversation" } },
       "required": ["message"],
-      "not": { "required": ["action"] }
+      "not": { "anyOf": [{ "required": ["action"] }, { "required": ["authorization"] }] }
     },
     {
       "properties": { "kind": { "const": "action" } },
@@ -53,6 +54,15 @@
           "type": "object",
           "description": "Non-sensitive structured parameters only."
         }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confirmation"],
+      "properties": {
+        "confirmation": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "rollback_plan": { "type": "string", "minLength": 1, "maxLength": 2000 }
       }
     }
   }

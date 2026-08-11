@@ -1,6 +1,6 @@
 use jarvis_core::{
-    ActionRequest, AuthContext, CoreGateway, CoreRequest, ExecutionResult, MemoryAuditSink,
-    PolicyEngine, ResponseStatus, RestrictedExecutor, API_VERSION,
+    ActionRequest, AuthContext, AuthorizationSubmission, CoreGateway, CoreRequest, ExecutionResult,
+    MemoryAuditSink, PolicyEngine, ResponseStatus, RestrictedExecutor, API_VERSION,
 };
 use serde_json::{json, Map, Value};
 use std::sync::{
@@ -62,6 +62,7 @@ fn action_request(capability: &str, target: &str) -> CoreRequest {
             target: target.into(),
             parameters: Map::new(),
         }),
+        authorization: None,
     }
 }
 
@@ -120,6 +121,66 @@ fn protected_actions_stop_at_authorization_boundary() {
     assert_eq!(response.status, ResponseStatus::AuthorizationRequired);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(audit.events()[0].outcome, "authorization_required");
+}
+
+#[test]
+fn tier_3_http_confirmation_without_rollback_plan_is_rejected() {
+    let executor = TestExecutor::verified();
+    let calls = Arc::clone(&executor.calls);
+    let (gateway, _) = gateway(executor);
+    let mut request = action_request("proxmox.vm.destroy", "vm-104");
+    request.authorization = Some(AuthorizationSubmission {
+        confirmation: "vm-104".into(),
+        rollback_plan: None,
+    });
+
+    let response = gateway.handle(&desktop_auth(), request);
+
+    assert_eq!(response.status, ResponseStatus::Denied);
+    assert_eq!(
+        response.error.expect("safe error").code,
+        "ROLLBACK_PLAN_REQUIRED"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn tier_3_valid_http_confirmation_reaches_executor_once() {
+    let executor = TestExecutor::verified();
+    let calls = Arc::clone(&executor.calls);
+    let (gateway, _) = gateway(executor);
+    let mut request = action_request("proxmox.vm.destroy", "vm-104");
+    request.authorization = Some(AuthorizationSubmission {
+        confirmation: "vm-104".into(),
+        rollback_plan: Some("restore vm-104 from the verified backup".into()),
+    });
+
+    let response = gateway.handle(&desktop_auth(), request);
+
+    assert_eq!(response.status, ResponseStatus::Completed);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn domain_agent_cannot_submit_human_confirmation() {
+    let executor = TestExecutor::verified();
+    let calls = Arc::clone(&executor.calls);
+    let (gateway, _) = gateway(executor);
+    let mut request = action_request("proxmox.vm.destroy", "vm-104");
+    request.authorization = Some(AuthorizationSubmission {
+        confirmation: "vm-104".into(),
+        rollback_plan: Some("restore vm-104 from the verified backup".into()),
+    });
+    let agent = AuthContext::authenticated("proxmox-agent:prod", vec!["proxmox-agent".into()]);
+
+    let response = gateway.handle(&agent, request);
+
+    assert_eq!(response.status, ResponseStatus::Denied);
+    assert_eq!(
+        response.error.expect("safe error").code,
+        "ROLE_NOT_AUTHORIZED"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -191,6 +252,7 @@ fn conversation_path_is_mock_only() {
         kind: "conversation".into(),
         message: Some("Report local status.".into()),
         action: None,
+        authorization: None,
     };
 
     let response = gateway.handle(&desktop_auth(), request);

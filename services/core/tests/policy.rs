@@ -38,7 +38,7 @@ fn tier_2_requires_single_use_authorization() {
         }
     );
     policy
-        .authorize(&operator(), &action, "session-a", None, None)
+        .authorize(&operator(), &action, "session-a", Some("approve"), None)
         .expect("tier 2 grant");
     assert_eq!(
         policy.evaluate_with_grant(&operator(), &action, "session-a"),
@@ -140,7 +140,7 @@ fn grants_are_session_scoped() {
     let policy = PolicyEngine::default();
     let action = action("security.user.disable", "user-alice");
     policy
-        .authorize(&operator(), &action, "session-a", None, None)
+        .authorize(&operator(), &action, "session-a", Some("approve"), None)
         .expect("tier 2 grant");
     assert_eq!(
         policy.evaluate_with_grant(&operator(), &action, "session-b"),
