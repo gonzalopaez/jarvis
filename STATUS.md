@@ -43,14 +43,15 @@ Verified on the real LiteLLM instance (192.168.1.11:4000, CT116, Ollama-backed):
   token, missing Wazuh API credential reference and incorrect Qdrant
   `POST /points` method were replaced with scoped credentials and the correct
   `PUT` upsert. Credentials remain only in n8n's encrypted store.
-- **Core unaffected.** No change to `services/core/src`; after the LiteLLM
-  restart, Core and Codex report `READY` and `jarvis-fast` still responds.
+- **Core remained healthy.** After the LiteLLM restart, Core and Codex report
+  `READY` and `jarvis-fast` still responds.
+- **Reasoning route repaired.** `jarvis-reasoning` is now deployed against
+  `ollama/qwen2.5`; both the `jarvis-core-voice` key and `jarvis-core` team are
+  restricted to `jarvis-fast` / `jarvis-reasoning`. A completion through the
+  new alias was verified from CT124 with Core's real credential.
 
 ### Not yet done / known gaps
 
-- **`jarvis-reasoning` is not defined** on the live LiteLLM, although
-  `services/core/src/voice.rs` references it. Pre-existing gap; left as-is to
-  avoid touching Core routing in this task.
 - Forwarding a verdict's `proposed_actions` to Core (the n8n↔Core action
   contract) is **not implemented**. Until `PolicyEngine` has rules for
   `security.user.disable` / `security.ip.block` / `security.host.isolate`, any

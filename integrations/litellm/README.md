@@ -7,10 +7,10 @@ in caller code.
 ## What is active
 
 - **Conversation routing** — `services/core/src/voice.rs` calls LiteLLM through
-  named aliases rather than physical model names. `jarvis-fast` is live;
-  `jarvis-reasoning` is referenced by Core but remains a known deployment gap.
+  named aliases rather than physical model names. Both `jarvis-fast` and
+  `jarvis-reasoning` are live and allowed by Core's scoped key/team policy.
 - **SOC triage aliases** — `jarvis-soc-l1` and `jarvis-soc-l2` (ADR-012) are the
-  consumed by the active n8n "SOC 2.0" workflow for L1/L2 alert triage.
+  aliases consumed by the active n8n "SOC 2.0" workflow for L1/L2 alert triage.
   They require structured output against
   `contracts/api/security-verdict.v1.schema.json`, replacing the workflow's
   previous free-text regex parsing.

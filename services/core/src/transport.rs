@@ -12,7 +12,9 @@ use http::{
 };
 use http_body::Body;
 use http_body_util::{BodyExt, Full, Limited};
-use serde::{Deserialize, Serialize};
+#[cfg(feature = "network-server")]
+use serde::Deserialize;
+use serde::Serialize;
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -223,6 +225,7 @@ where
             (&Method::POST, "/v1/requests" | "/api/v1/requests") => {
                 self.handle_core_request(request).await
             }
+            #[cfg(feature = "network-server")]
             (&Method::POST, "/api/v1/voice/alert") => self.handle_alert_audio(request).await,
             (_, "/v1/health") => method_not_allowed("GET"),
             (_, "/api/v1/health" | "/api/v1/agents") => method_not_allowed("GET"),
