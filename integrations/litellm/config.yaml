@@ -35,6 +35,13 @@ model_list:
       api_base: http://127.0.0.1:11434
       temperature: 0.05
 
+  - model_name: jarvis-embed-multilingual
+    litellm_params:
+      model: ollama/bge-m3
+      api_base: http://127.0.0.1:11434
+    model_info:
+      mode: embedding
+
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/LITELLM_DATABASE_URL   # required for virtual-key issuance/budgets

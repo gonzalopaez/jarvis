@@ -1,3 +1,4 @@
+use crate::KnowledgeClient;
 use crate::{
     AiMode, CapabilityRequest, CapabilityRoute, CapabilityRouter, CoreRequest, CoreResponse,
     DeterministicCapabilityRouter, EventBus, EventType, RequestSource, ResponseStatus,
@@ -47,6 +48,7 @@ pub struct ConversationService {
     codex: Option<CodexHttpClient>,
     events: EventBus,
     pending_mitigation: Arc<Mutex<HashMap<String, Instant>>>,
+    knowledge: Option<KnowledgeClient>,
 }
 
 impl ConversationService {
@@ -57,7 +59,13 @@ impl ConversationService {
             codex,
             events,
             pending_mitigation: Arc::new(Mutex::new(HashMap::new())),
+            knowledge: None,
         }
+    }
+
+    pub fn with_knowledge(mut self, knowledge: KnowledgeClient) -> Self {
+        self.knowledge = Some(knowledge);
+        self
     }
 
     pub async fn handle(&self, request: &CoreRequest) -> CoreResponse {
@@ -312,10 +320,19 @@ impl ConversationService {
             None,
             json!({ "current": "THINKING", "state": "THINKING" }),
         );
+        let context = match &self.knowledge {
+            Some(knowledge) => knowledge.retrieve(message).await.ok().flatten(),
+            None => None,
+        };
+        let (selected_alias, selected_mode) = if context.is_some() {
+            ("jarvis-reasoning", "rag")
+        } else {
+            (alias, mode)
+        };
         self.models
-            .complete_text(message, alias)
+            .complete_text_with_context(message, selected_alias, context.as_deref())
             .await
-            .map(|output| (output, mode))
+            .map(|output| (output, selected_mode))
             .map_err(|_| ("MODEL_UNAVAILABLE", "Configured model is unavailable"))
     }
 

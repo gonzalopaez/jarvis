@@ -57,3 +57,24 @@ Verified on the real LiteLLM instance (192.168.1.11:4000, CT116, Ollama-backed):
   `security.user.disable` / `security.ip.block` / `security.host.isolate`, any
   forwarded action would be denied `CAPABILITY_DENIED`, which is the correct
   default.
+
+## Infrastructure knowledge RAG (ADR-013)
+
+Verified on the live services on **2026-08-11**:
+
+- Qdrant collection `jarvis_knowledge_bge_v1` is green with 86 chunks from 35
+  reviewed repository documentation files. Existing SOC/trading collections
+  remain separate and unchanged.
+- Ollama `bge-m3` is exposed only through the LiteLLM alias
+  `jarvis-embed-multilingual`. Runtime and ingestion credentials are separate,
+  budgeted, rate-limited and cannot call chat models.
+- Jarvis Core reports `rag_enabled=true`. Retrieval uses four results, an
+  eight-second deadline, a 12 KiB context limit and a calibrated score threshold
+  of `0.50`; unavailable retrieval degrades to normal conversation.
+- A live query about LiteLLM returned the correct control-plane description with
+  `[integrations/litellm/README.md]` and `mode=rag`. A live query about RAG
+  storage identified Qdrant and `jarvis_knowledge_bge_v1` with ADR-013 as its
+  source. A greeting remained on `mode=fast` without RAG context.
+- The initial Nomic test collection and its two scoped credentials were removed
+  after the multilingual comparison; they can be recreated from the indexer if
+  rollback testing is ever required.
