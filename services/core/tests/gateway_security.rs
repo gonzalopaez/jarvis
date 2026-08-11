@@ -115,7 +115,7 @@ fn protected_actions_stop_at_authorization_boundary() {
     let (gateway, audit) = gateway(executor);
     let auth = AuthContext::authenticated("operator:test", vec!["operator".into()]);
 
-    let response = gateway.handle(&auth, action_request("demo.protected_action", "demo"));
+    let response = gateway.handle(&auth, action_request("security.host.isolate", "host-01"));
 
     assert_eq!(response.status, ResponseStatus::AuthorizationRequired);
     assert_eq!(calls.load(Ordering::SeqCst), 0);

@@ -40,7 +40,7 @@ pub use events::{
 };
 pub use executor::{ExecutionResult, RestrictedExecutor};
 pub use gateway::CoreGateway;
-pub use policy::{Decision, PolicyEngine, Risk, Rule};
+pub use policy::{AuthorizationError, Decision, PolicyEngine, Risk, Rule};
 pub use routing::{
     AiMode, CapabilityRequest, CapabilityRoute, CapabilityRouter, Complexity,
     DeterministicCapabilityRouter, RequestSource, RoutingDecision,

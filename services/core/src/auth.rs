@@ -1,10 +1,56 @@
 use crate::{AuthContext, AuthError, Authenticator};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use subtle::ConstantTimeEq;
 
 pub const MIN_BEARER_BYTES: usize = 32;
 pub const MAX_BEARER_BYTES: usize = 4096;
+
+#[derive(Debug, Clone)]
+pub(crate) struct OneTimeGrantStore<K> {
+    grants: Arc<Mutex<HashMap<K, Instant>>>,
+    max_entries: usize,
+}
+
+impl<K> OneTimeGrantStore<K>
+where
+    K: Eq + Hash + Clone,
+{
+    pub(crate) fn new(max_entries: usize) -> Self {
+        Self {
+            grants: Arc::new(Mutex::new(HashMap::new())),
+            max_entries,
+        }
+    }
+
+    pub(crate) fn issue_at(&self, key: K, now: Instant) -> bool {
+        self.grants
+            .lock()
+            .map(|mut grants| {
+                if grants.len() >= self.max_entries && !grants.contains_key(&key) {
+                    return false;
+                }
+                grants.insert(key, now);
+                true
+            })
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn take_at(&self, key: &K, ttl: Duration, now: Instant) -> bool {
+        self.grants
+            .lock()
+            .map(|mut grants| {
+                grants.retain(|_, issued| now.saturating_duration_since(*issued) <= ttl);
+                grants.remove(key).is_some()
+            })
+            .unwrap_or(false)
+    }
+}
 
 pub struct CredentialRecord {
     digest: [u8; 32],
