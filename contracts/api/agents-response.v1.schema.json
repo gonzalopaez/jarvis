@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/api/agents-response.v1.schema.json",
+  "title": "JARVIS agent inventory v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "agents"],
+  "properties": {
+    "api_version": { "const": "v1" },
+    "agents": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "status", "agent_status", "version"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9_.-]{1,64}$" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "status": { "enum": ["healthy", "degraded", "unavailable"] },
+          "agent_status": {
+            "enum": ["REALTIME", "READY", "BUSY", "DEGRADED", "ERROR", "OFFLINE"]
+          },
+          "version": { "type": "string", "minLength": 1, "maxLength": 32 },
+          "latency_ms": { "type": "integer", "minimum": 0 },
+          "last_seen_ms": { "type": "integer", "minimum": 0 },
+          "error": { "type": "string", "minLength": 1, "maxLength": 64 }
+        }
+      }
+    }
+  }
+}

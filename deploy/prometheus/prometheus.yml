@@ -1,0 +1,38 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - 192.168.1.24:9090
+
+  # Operational telemetry stays on the private service network. These endpoints
+  # are never exposed by Nginx and are consumed only by Prometheus.
+  - job_name: jarvis_nodes
+    static_configs:
+      - targets: [192.168.1.5:9100]
+        labels:
+          component: server-central
+      - targets: [192.168.1.15:9100]
+        labels:
+          component: n8n
+      - targets: [192.168.1.11:9100]
+        labels:
+          component: litellm
+      - targets: [192.168.1.20:9100]
+        labels:
+          component: openbao
+      - targets: [192.168.1.21:9100]
+        labels:
+          component: jarvis-core
+      - targets: [192.168.1.22:9100]
+        labels:
+          component: voice-engine
+      - targets: [192.168.1.23:9100]
+        labels:
+          component: mcp-gateway
+      - targets: [192.168.1.24:9100]
+        labels:
+          component: prometheus

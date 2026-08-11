@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/api/transport-error.v1.schema.json",
+  "title": "Jarvis Core transport error v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "status", "error"],
+  "properties": {
+    "api_version": { "const": "v1" },
+    "status": { "const": "rejected" },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

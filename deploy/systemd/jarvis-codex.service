@@ -1,0 +1,40 @@
+[Unit]
+Description=JARVIS Codex expert-agent service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jarvis-codex
+Group=jarvis-codex
+WorkingDirectory=/opt/jarvis-codex
+Environment=HOME=/var/lib/jarvis-codex
+Environment=JARVIS_CODEX_BIND=127.0.0.1
+Environment=JARVIS_CODEX_PORT=4400
+Environment=JARVIS_CODEX_TOKEN_FILE=%d/service-token
+Environment=JARVIS_CODEX_GATEWAY_TOKEN_FILE=%d/litellm-token
+Environment=JARVIS_CODEX_BASE_URL=http://192.168.1.11:4000/v1
+Environment=JARVIS_CODEX_MODEL=jarvis-technical
+Environment=JARVIS_MCP_URL=http://192.168.1.23:4300/mcp
+Environment=JARVIS_MCP_TOKEN_FILE=%d/mcp-token
+EnvironmentFile=-/etc/jarvis-codex/environment
+LoadCredential=service-token:/etc/jarvis-codex/service-token
+LoadCredential=litellm-token:/etc/jarvis-codex/litellm-token
+LoadCredential=mcp-token:/etc/jarvis-codex/mcp-token
+ExecStart=/usr/bin/node /opt/jarvis-codex/dist/server.js
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+
+NoNewPrivileges=yes
+ReadWritePaths=/var/lib/jarvis-codex
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

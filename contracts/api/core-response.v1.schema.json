@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/api/core-response.v1.schema.json",
+  "title": "Jarvis Core response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "request_id", "session_id", "status", "audit_id"],
+  "properties": {
+    "api_version": { "const": "v1" },
+    "request_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "status": {
+      "enum": ["completed", "authorization_required", "denied", "rejected"]
+    },
+    "audit_id": { "type": "string" },
+    "data": {},
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

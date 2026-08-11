@@ -1,10 +1,14 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(async () => ({
+export default defineConfig(({ mode }) => {
+  const environment = loadEnv(mode, ".", "JARVIS_");
+  const coreOrigin = environment.JARVIS_CORE_URL;
+
+  return {
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
@@ -26,5 +30,16 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+    // Development-only same-origin health bridge. Protected routes are not proxied.
+    proxy: coreOrigin
+      ? {
+          "/api/v1/health": {
+            target: coreOrigin,
+            changeOrigin: true,
+            secure: true,
+          },
+        }
+      : undefined,
   },
-}));
+  };
+});

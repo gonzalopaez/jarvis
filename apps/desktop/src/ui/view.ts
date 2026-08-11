@@ -1,47 +1,82 @@
 import type { JarvisModel, JarvisState, TelemetrySnapshot } from "../core/types";
-import { STATE_LABELS } from "../core/types";
-
-const stateModes: Record<JarvisState, string> = {
-  idle: "SIGNAL // AMBIENT",
-  listening: "VOICE // INPUT",
-  thinking: "NEURAL // PROCESSING",
-  routing: "INTENT // CLASSIFYING",
-  "codex-analyzing": "CODEX // ANALYSIS",
-  "codex-executing": "CODEX // TASK ACTIVITY",
-  "n8n-executing": "N8N // WORKFLOW ACTIVITY",
-  speaking: "JARVIS // OUTPUT",
-  warning: "SYSTEM // ANOMALY",
-  "authorization-required": "SECURITY // HOLD",
-  error: "SYSTEM // FAULT",
-  offline: "SIGNAL // LOST",
-};
+import { STATE_ANIMATION, STATE_PRESENTATION } from "../core/state-theme";
 
 export class JarvisView {
   private readonly networkHistory: Array<[number, number]> = [];
+  private readonly metricHistory: Record<"cpu" | "memory" | "disk", number[]> = { cpu: [], memory: [], disk: [] };
   private wavePhase = 0;
   private animationFrame = 0;
+  private animationTimer = 0;
   private currentState: JarvisState = "idle";
+  private agentsSignature = "";
+  private activitySignature = "";
+  private securitySignature = "";
+  private interactionSignature = "";
+  private audioLevel = 0;
+  private audioSource: JarvisModel["audioVisualization"]["source"] = "none";
 
   constructor(private readonly root: HTMLElement) {
-    this.animateWaveform();
+    document.addEventListener("visibilitychange", this.handleVisibilityChange);
+    this.scheduleWaveform(true);
   }
 
   render(model: JarvisModel): void {
     this.currentState = model.state;
+    const presentation = STATE_PRESENTATION[model.state];
     this.root.dataset.state = model.state;
-    this.text("state-label", STATE_LABELS[model.state]);
-    this.text("wave-mode", stateModes[model.state]);
+    this.root.dataset.theme = presentation.theme;
+    this.root.classList.toggle("is-active-state", presentation.animateWhenIdle);
+    this.root.classList.toggle("has-core-motion", model.state !== "offline");
+    this.applyAnimationProfile(model.state);
+    this.text("state-label", model.operationContext ? model.operationContext.replace(/ /g, " // ") : presentation.label);
+    this.text("wave-mode", presentation.mode);
+    this.audioLevel = model.audioVisualization.level;
+    this.audioSource = model.audioVisualization.source;
+    this.text("voice-state", model.state.toUpperCase().replace(/-/g, " "));
+    this.text("voice-context", voiceContext(model.state, this.audioSource));
+    this.root.dataset.audioSource = this.audioSource;
     this.text("user-transcript", model.userTranscript);
     this.text("jarvis-transcript", model.jarvisTranscript);
     this.renderAgents(model);
     this.renderActivity(model);
+    this.renderCoreInteraction(model);
+    this.renderSecurity(model);
     this.renderAuthorization(model.state === "authorization-required");
     document.querySelector("#dev-controls")?.classList.toggle("is-hidden", !model.developerControls);
     if (model.telemetry) this.renderTelemetry(model.telemetry);
+    this.scheduleWaveform();
+  }
+
+  private applyAnimationProfile(state: JarvisState): void {
+    const profile = STATE_ANIMATION[state];
+    const values: Record<string, string> = {
+      "--pulse-speed": `${profile.pulseSeconds}s`,
+      "--inner-speed": `${profile.innerRotationSeconds}s`,
+      "--processing-speed": `${profile.processingRotationSeconds}s`,
+      "--routing-speed": `${profile.routingRotationSeconds}s`,
+      "--execution-speed": `${profile.executionRotationSeconds}s`,
+      "--telemetry-speed": `${profile.telemetryRotationSeconds}s`,
+      "--outer-speed": `${profile.outerRotationSeconds}s`,
+      "--sweep-speed": `${profile.sweepSeconds}s`,
+      "--core-glow": String(profile.glowIntensity),
+      "--core-glow-radius": `${Math.round(10 + profile.glowIntensity * 24)}px`,
+      "--core-heart-scale": String(1 + profile.glowIntensity * .035),
+      "--core-heart-brightness": String(1 + profile.glowIntensity * .18),
+      "--routing-activity": String(profile.routingActivity),
+      "--execution-activity": String(profile.executionActivity),
+      "--orbital-activity": String(profile.orbitalActivity),
+      "--routing-opacity": String(.12 + profile.routingActivity * .72),
+      "--execution-opacity": String(.1 + profile.executionActivity * .72),
+      "--orbit-one-opacity": String(.25 + profile.orbitalActivity * .75),
+      "--orbit-two-opacity": String(.2 + profile.orbitalActivity * .8),
+    };
+    for (const [name, value] of Object.entries(values)) this.root.style.setProperty(name, value);
   }
 
   destroy(): void {
     cancelAnimationFrame(this.animationFrame);
+    window.clearTimeout(this.animationTimer);
+    document.removeEventListener("visibilitychange", this.handleVisibilityChange);
   }
 
   private renderTelemetry(data: TelemetrySnapshot): void {
@@ -59,12 +94,93 @@ export class JarvisView {
     this.setMetric("cpu", data.cpuUsage);
     this.setMetric("memory", data.memoryUsage);
     this.setMetric("disk", data.diskUsage);
+    this.pushMetric("cpu", data.cpuUsage);
+    this.pushMetric("memory", data.memoryUsage);
+    this.pushMetric("disk", data.diskUsage);
+    this.text("security-disk-read", data.diskReadBytesPerSec === undefined ? "--" : formatRate(data.diskReadBytesPerSec));
+    this.text("security-disk-write", data.diskWriteBytesPerSec === undefined ? "--" : formatRate(data.diskWriteBytesPerSec));
     this.networkHistory.push([data.networkRxPerSec, data.networkTxPerSec]);
     if (this.networkHistory.length > 64) this.networkHistory.shift();
     this.drawNetwork();
   }
 
+  private pushMetric(name: "cpu" | "memory" | "disk", value: number): void {
+    const history = this.metricHistory[name];
+    history.push(Math.max(0, Math.min(value, 100)));
+    if (history.length > 48) history.shift();
+    const canvas = this.root.querySelector<HTMLCanvasElement>(`#${name}-sparkline`);
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.beginPath();
+    context.strokeStyle = "#4cdbff";
+    context.lineWidth = 1.25;
+    history.forEach((point, index) => {
+      const x = index / Math.max(1, history.length - 1) * canvas.width;
+      const y = canvas.height - 2 - point / 100 * (canvas.height - 4);
+      if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
+    });
+    context.stroke();
+  }
+
+  private renderSecurity(model: JarvisModel): void {
+    const signature = JSON.stringify([model.securityTelemetry, model.securityAlerts.map((alert) => alert.id)]);
+    if (signature === this.securitySignature) return;
+    this.securitySignature = signature;
+    const telemetry = model.securityTelemetry;
+    this.root.classList.toggle("has-security-data", telemetry !== null);
+    this.root.classList.toggle("has-security-alerts", model.securityAlerts.length > 0);
+    this.text("security-source-state", telemetry ? `${telemetry.source.toUpperCase()} / LIVE` : "OFFLINE");
+    const values: Array<[string, number | undefined]> = [
+      ["security-failed-logins", telemetry?.failedLogins], ["security-sudo", telemetry?.sudoCommands],
+      ["security-fim", telemetry?.fimChanges], ["security-processes", telemetry?.newProcesses],
+      ["security-connections", telemetry?.networkConnections], ["security-ports", telemetry?.listeningPorts],
+      ["security-inbound", telemetry?.inboundConnections], ["security-outbound", telemetry?.outboundConnections],
+      ["security-users", telemetry?.privilegedUsersOnline],
+    ];
+    for (const [id, value] of values) this.text(id, value === undefined ? "--" : String(value));
+    this.text("security-alert-count", model.securityAlerts.length ? String(model.securityAlerts.length) : "--");
+    const empty = this.root.querySelector<HTMLElement>("#security-alerts-empty");
+    empty?.toggleAttribute("hidden", model.securityAlerts.length > 0);
+    const list = this.root.querySelector<HTMLElement>("#security-alert-list");
+    if (!list) return;
+    list.replaceChildren(...model.securityAlerts.slice(0, 6).map((alert) => {
+      const row = document.createElement("article");
+      row.className = `security-alert severity-${alert.severity}`;
+      const time = document.createElement("time");
+      const title = document.createElement("strong");
+      const description = document.createElement("p");
+      time.textContent = new Date(alert.timestampMs).toLocaleTimeString("es-AR", { hour12: false });
+      title.textContent = `${alert.severity.toUpperCase()} // ${alert.host ? `${alert.host} // ` : ""}${alert.title}`;
+      description.textContent = alert.description;
+      row.append(time, title, description);
+      return row;
+    }));
+  }
+
+  private renderCoreInteraction(model: JarvisModel): void {
+    const signature = model.activity.slice(0, 4).map((event) => event.id).join("|");
+    if (signature === this.interactionSignature) return;
+    this.interactionSignature = signature;
+    const stream = this.root.querySelector<HTMLElement>("#core-interaction-stream");
+    if (!stream) return;
+    stream.replaceChildren(...model.activity.slice(0, 4).map((event) => {
+      const row = document.createElement("div");
+      const time = document.createElement("time");
+      const source = document.createElement("strong");
+      const message = document.createElement("span");
+      time.textContent = event.timestamp.toLocaleTimeString("es-AR", { hour12: false });
+      source.textContent = event.component;
+      message.textContent = event.event;
+      row.append(time, source, message);
+      return row;
+    }));
+  }
+
   private renderAgents(model: JarvisModel): void {
+    const signature = JSON.stringify(model.agents);
+    if (signature === this.agentsSignature) return;
+    this.agentsSignature = signature;
     const list = this.root.querySelector<HTMLElement>("#agent-list");
     if (!list) return;
     list.replaceChildren(
@@ -87,6 +203,9 @@ export class JarvisView {
   }
 
   private renderActivity(model: JarvisModel): void {
+    const signature = model.activity.slice(0, 12).map((event) => event.id).join("|");
+    if (signature === this.activitySignature) return;
+    this.activitySignature = signature;
     const stream = this.root.querySelector<HTMLElement>("#activity-stream");
     if (!stream) return;
     stream.replaceChildren(
@@ -144,26 +263,22 @@ export class JarvisView {
     });
   }
 
-  private animateWaveform = (): void => {
+  private drawWaveform(): void {
     const canvas = this.root.querySelector<HTMLCanvasElement>("#wave-canvas");
     const context = canvas?.getContext("2d");
     if (canvas && context) {
-      const activity: Record<JarvisState, number> = {
-        idle: 0.08, listening: 0.85, thinking: 0.34, routing: 0.46,
-        "codex-analyzing": 0.55, "codex-executing": 0.76, "n8n-executing": 0.68,
-        speaking: 0.9, warning: 0.62, "authorization-required": 0.2,
-        error: 0.72, offline: 0.02,
-      };
-      const amp = activity[this.currentState];
+      const activity = STATE_PRESENTATION[this.currentState].waveformActivity;
+      const amp = this.audioSource === "none" ? 0 : Math.max(.04, activity * this.audioLevel);
       const width = canvas.width;
       const height = canvas.height;
       context.clearRect(0, 0, width, height);
       const gradient = context.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, "rgba(76,219,255,0)");
-      gradient.addColorStop(0.18, "rgba(76,219,255,.7)");
-      gradient.addColorStop(0.5, "rgba(202,248,255,.95)");
-      gradient.addColorStop(0.82, "rgba(76,219,255,.7)");
-      gradient.addColorStop(1, "rgba(76,219,255,0)");
+      const stateColor = getComputedStyle(this.root).getPropertyValue("--state").trim() || "#4cdbff";
+      gradient.addColorStop(0, "transparent");
+      gradient.addColorStop(0.18, stateColor);
+      gradient.addColorStop(0.5, stateColor);
+      gradient.addColorStop(0.82, stateColor);
+      gradient.addColorStop(1, "transparent");
       context.strokeStyle = gradient;
       context.lineWidth = 1.5;
       context.beginPath();
@@ -177,16 +292,39 @@ export class JarvisView {
       context.stroke();
       context.strokeStyle = "rgba(76,219,255,.16)";
       context.beginPath(); context.moveTo(0, height / 2); context.lineTo(width, height / 2); context.stroke();
-      this.text("wave-level", `${(-54 + amp * 46).toFixed(1)} dB`);
+      this.text("wave-level", this.audioSource === "none" ? "-- dB" : `${(-54 + amp * 46).toFixed(1)} dB`);
       this.wavePhase += 0.045 + amp * 0.12;
     }
-    this.animationFrame = requestAnimationFrame(this.animateWaveform);
+  }
+
+  private scheduleWaveform(force = false): void {
+    cancelAnimationFrame(this.animationFrame);
+    window.clearTimeout(this.animationTimer);
+    this.drawWaveform();
+    const active = this.audioSource !== "none" || this.currentState === "thinking";
+    if ((!active && !force) || document.hidden) return;
+    this.animationTimer = window.setTimeout(() => {
+      this.animationFrame = requestAnimationFrame(() => this.scheduleWaveform());
+    }, this.audioSource !== "none" ? 33 : active ? 66 : 1_000);
+  }
+
+  private handleVisibilityChange = (): void => {
+    this.root.classList.toggle("is-background", document.hidden);
+    this.scheduleWaveform(true);
   };
 
   private text(id: string, value: string): void {
     const element = this.root.querySelector<HTMLElement>(`#${id}`);
     if (element && element.textContent !== value) element.textContent = value;
   }
+}
+
+function voiceContext(state: JarvisState, source: JarvisModel["audioVisualization"]["source"]): string {
+  if (state === "listening") return source === "microphone" ? "Microphone input active." : "Listening channel active; audio source unavailable.";
+  if (state === "speaking") return source === "tts" ? "Synthesized voice output active." : source === "dev" ? "DEV audio visualization active." : "Voice output state active; audio source unavailable.";
+  if (state === "thinking") return "Processing available context.";
+  if (state === "authorization-required") return "Execution paused pending operator approval.";
+  return "Awaiting authenticated voice stream.";
 }
 
 export function formatBytes(bytes: number): string {

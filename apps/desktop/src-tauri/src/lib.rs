@@ -1,3 +1,6 @@
+mod core_client;
+
+use core_client::{CoreClient, CoreConversation, CoreHealth};
 use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -110,11 +113,30 @@ fn get_system_telemetry(
         .map(|mut collector| collector.snapshot())
 }
 
+#[tauri::command]
+async fn get_core_health(state: tauri::State<'_, CoreClient>) -> Result<CoreHealth, String> {
+    state.health().await.map_err(str::to_owned)
+}
+
+#[tauri::command]
+async fn send_core_conversation(
+    message: String,
+    state: tauri::State<'_, CoreClient>,
+) -> Result<CoreConversation, String> {
+    state.conversation(message).await.map_err(str::to_owned)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let core_client = CoreClient::from_environment();
     tauri::Builder::default()
         .manage(Mutex::new(TelemetryCollector::new()))
-        .invoke_handler(tauri::generate_handler![get_system_telemetry])
+        .manage(core_client)
+        .invoke_handler(tauri::generate_handler![
+            get_system_telemetry,
+            get_core_health,
+            send_core_conversation
+        ])
         .run(tauri::generate_context!())
         .expect("error while running JARVIS");
 }

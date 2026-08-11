@@ -1,11 +1,11 @@
+import type { AudioVisualizerReading } from "../audio/source";
+
 export type JarvisState =
   | "idle"
   | "listening"
   | "thinking"
   | "routing"
-  | "codex-analyzing"
-  | "codex-executing"
-  | "n8n-executing"
+  | "executing"
   | "speaking"
   | "warning"
   | "authorization-required"
@@ -13,7 +13,7 @@ export type JarvisState =
   | "offline";
 
 export type EventSeverity = "info" | "success" | "warning" | "error";
-export type ServiceState = "ready" | "active" | "staged" | "offline" | "warning";
+export type ServiceState = "realtime" | "ready" | "busy" | "degraded" | "error" | "offline";
 
 export interface TelemetrySnapshot {
   timestampMs: number;
@@ -30,6 +30,9 @@ export interface TelemetrySnapshot {
   loadAverage: [number, number, number];
   hostname: string;
   kernel: string;
+  diskReadBytesPerSec?: number;
+  diskWriteBytesPerSec?: number;
+  temperatures?: Array<{ sensor: string; celsius: number }>;
 }
 
 export interface AgentStatus {
@@ -39,6 +42,59 @@ export interface AgentStatus {
   detail: string;
   latencyMs?: number;
   simulated: boolean;
+}
+
+export interface CoreHealth {
+  online: boolean;
+  apiVersion: string;
+  status: string;
+  latencyMs: number;
+  state?: JarvisState;
+  components?: ComponentHealth[];
+}
+
+export interface ComponentHealth {
+  id: string;
+  label: string;
+  status: "healthy" | "degraded" | "unavailable";
+  agentStatus: ServiceState;
+  version: string;
+  latencyMs?: number;
+  lastSeenMs?: number;
+  error?: string;
+}
+
+export type SecuritySeverity = "low" | "medium" | "high" | "critical";
+
+export interface SecurityAlert {
+  id: string;
+  host?: string;
+  timestampMs: number;
+  severity: SecuritySeverity;
+  title: string;
+  description: string;
+}
+
+export interface SecurityTelemetrySnapshot {
+  timestampMs: number;
+  source: "wazuh" | "jarvis";
+  failedLogins?: number;
+  sudoCommands?: number;
+  fimChanges?: number;
+  newProcesses?: number;
+  networkConnections?: number;
+  inboundConnections?: number;
+  outboundConnections?: number;
+  privilegedUsersOnline?: number;
+  listeningPorts?: number;
+}
+
+export interface CoreConversation {
+  requestId: string;
+  status: string;
+  auditId: string;
+  message: string;
+  mode: string;
 }
 
 export interface ActivityEvent {
@@ -59,29 +115,32 @@ export interface JarvisModel {
   userTranscript: string;
   jarvisTranscript: string;
   developerControls: boolean;
+  audioVisualization: AudioVisualizerReading;
+  operationContext?: string;
+  securityTelemetry: SecurityTelemetrySnapshot | null;
+  securityAlerts: SecurityAlert[];
 }
 
 export interface AppEvents {
   "state.changed": { state: JarvisState; previous: JarvisState };
   "telemetry.updated": TelemetrySnapshot;
   "telemetry.failed": { message: string };
+  "telemetry.unavailable": { message: string };
+  "core.health.updated": CoreHealth;
+  "core.health.failed": { message: string };
   "activity.created": ActivityEvent;
   "transcript.updated": { role: "user" | "jarvis"; text: string };
   "authorization.approved": { action: string };
   "authorization.denied": { action: string };
+  "realtime.connected": { connectedAtMs: number };
+  "realtime.disconnected": { reason: string };
+  "realtime.unavailable": { reason: string };
+  "realtime.resync.required": Record<string, never>;
+  "realtime.state.changed": { state: JarvisState };
+  "realtime.agent.changed": ComponentHealth;
+  "realtime.activity": { component: string; message: string; severity: EventSeverity };
+  "voice.input.level": { level: number };
+  "voice.output.level": { level: number };
+  "security.telemetry.updated": SecurityTelemetrySnapshot;
+  "security.alert": SecurityAlert;
 }
-
-export const STATE_LABELS: Record<JarvisState, string> = {
-  idle: "SYSTEM // STANDBY",
-  listening: "VOICE // LISTENING",
-  thinking: "JARVIS // THINKING",
-  routing: "INTENT // ROUTING",
-  "codex-analyzing": "CODEX // ANALYZING",
-  "codex-executing": "CODEX // EXECUTING",
-  "n8n-executing": "N8N // EXECUTING",
-  speaking: "JARVIS // SPEAKING",
-  warning: "SYSTEM // WARNING",
-  "authorization-required": "AUTHORIZATION // REQUIRED",
-  error: "SYSTEM // ERROR",
-  offline: "SYSTEM // OFFLINE",
-};

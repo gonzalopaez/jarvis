@@ -1,0 +1,7 @@
+127.0.0.1 localhost
+::1 localhost ip6-localhost ip6-loopback
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+# Proxmox certificate SAN contains this hostname; do not replace with an unverified IP URL.
+192.168.1.5 Proxmox Proxmox.d4rkn0d3
+192.168.1.23 jarvis-mcp

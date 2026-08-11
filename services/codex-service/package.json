@@ -1,0 +1,19 @@
+{
+  "name": "@jarvis/codex-service",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test dist/*.test.js",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "0.147.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.6.2"
+  }
+}

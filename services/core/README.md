@@ -1,3 +1,48 @@
 # Jarvis Core
 
-Future single API, routing, policy and authorization boundary. No implementation exists in v0.1-clean.
+Jarvis Core is the security and policy boundary behind the future single Desktop API.
+
+## Implemented foundation
+
+- strict versioned request types;
+- bounded schema and correlation-ID validation;
+- rejection of secret-shaped structured action fields;
+- explicit authenticated principal context;
+- exact capability/target rules and role checks;
+- deny-by-default policy;
+- mandatory authorization boundary for protected actions;
+- restricted executor trait with verified-result requirement;
+- sanitized audit events;
+- routed conversation responses through configured private services, with a fail-closed mock fallback when no conversation service is installed.
+- exact HTTP routes for health and Core requests;
+- opaque transport authentication interface;
+- body-size, content-type, method and request-deadline controls;
+- no-store/nosniff response headers and sanitized transport errors;
+- optional Hyper listener through the network-server feature.
+- hashed Bearer-token authentication with server-owned subjects and roles;
+- enforced loopback/private/unique-local bind policy.
+- canonical `/api/v1/health`, `/api/v1/agents` and `/api/v1/requests` routes;
+- normalized health for the eight server components without simulated readiness;
+- temporary compatibility for the original `/v1` health and request routes.
+- bounded in-process Event Bus with normalized versioned envelopes;
+- authenticated `/ws` upgrade with exact Origin validation, snapshot, heartbeat and lag resynchronization.
+- bounded, expirable and revocable opaque browser sessions stored as digests;
+- exact-Origin and CSRF enforcement for cookie-authenticated writes.
+- normalized Telemetry Service with bounded collection intervals and adapter deadlines as a required boundary;
+- explicit unavailable Prometheus adapter that never emits fabricated metrics.
+
+The executable fails closed unless `JARVIS_CORE_BIND` contains a validated private socket address and systemd provides `auth-registry.json` through `CREDENTIALS_DIRECTORY`. The registry contains only SHA-256 digests with server-owned subjects and roles; raw Bearer values are prohibited. The deployment unit binds explicitly to the private Core workload address. TLS termination and trusted proxy handling remain separate reviewed work.
+
+The included Bearer adapter accepts only opaque credentials of at least 32 bytes and retains SHA-256 digests rather than raw values. It is a transitional private-integration mechanism; see docs/authentication.md.
+
+No provider, model, n8n, OpenBao, shell or infrastructure adapter is connected.
+
+The deployed executor is intentionally disabled. Health, governed conversation, telemetry and read-only security alert paths can be exercised, but no infrastructure action can execute until a capability-specific executor passes a separate review.
+
+WebSocket startup additionally requires `JARVIS_WEB_ORIGIN` as one exact HTTPS origin without a trailing slash. The gateway fails closed when missing, rejects anonymous or cross-origin upgrades and does not provide a browser authentication bypass.
+
+## Test
+
+    cargo test -p jarvis-core
+    cargo test -p jarvis-core --features network-server
+    cargo clippy -p jarvis-core --all-features --all-targets -- -D warnings

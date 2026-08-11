@@ -1,0 +1,27 @@
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        iifname "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        ip protocol icmp accept
+        ip6 nexthdr ipv6-icmp accept
+
+        ip saddr 192.168.1.5 tcp dport 22 ct state new accept
+        ip saddr 192.168.1.21 tcp dport 9090 ct state new accept
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+    }
+
+    chain output {
+        type filter hook output priority filter; policy accept;
+    }
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/events/audit-event.v1.schema.json",
+  "title": "Jarvis audit event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["audit_id", "request_id", "subject", "outcome"],
+  "properties": {
+    "audit_id": { "type": "string" },
+    "request_id": { "type": "string" },
+    "subject": { "type": "string" },
+    "capability": { "type": ["string", "null"] },
+    "target": { "type": ["string", "null"] },
+    "outcome": {
+      "enum": [
+        "rejected",
+        "denied",
+        "authorization_required",
+        "mock_completed",
+        "verified",
+        "verification_failed"
+      ]
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/events/realtime-envelope.v1.schema.json",
+  "title": "JARVIS realtime event envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_version", "event_id", "type", "timestamp_ms", "payload"],
+  "properties": {
+    "event_version": { "const": "v1" },
+    "event_id": { "type": "string", "pattern": "^event-[0-9a-f]{16}$" },
+    "type": {
+      "enum": [
+        "system.snapshot",
+        "system.heartbeat",
+        "system.resync_required",
+        "jarvis.state.changed",
+        "agent.status.changed",
+        "agent.task.started",
+        "agent.task.completed",
+        "agent.task.failed",
+        "telemetry.snapshot",
+        "telemetry.source.status"
+      ]
+    },
+    "timestamp_ms": { "type": "integer", "minimum": 0 },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.:-]+$"
+    },
+    "payload": { "type": "object" }
+  }
+}

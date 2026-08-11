@@ -1,3 +1,6 @@
+import { coreStateAndTranscript, jarvisCore, stateVoicePanel } from "./components/core";
+import { securityAlertsPanel, securityTelemetryPanel } from "./components/security";
+
 export const appTemplate = `
   <main class="hud" data-state="idle">
     <div class="ambient-grid" aria-hidden="true"></div>
@@ -13,24 +16,24 @@ export const appTemplate = `
         <div class="readout"><span>UPTIME</span><strong id="uptime">--:--:--</strong></div>
         <div class="clock-block"><strong id="clock">00:00:00</strong><span id="date">-- --- ----</span></div>
       </div>
-      <button class="window-control" id="dev-toggle" aria-label="Alternar controles de desarrollo">DEV</button>
+      <div class="session-controls"><button class="window-control" id="session-toggle">CONNECT</button><button class="window-control" id="dev-toggle" aria-label="Alternar controles de desarrollo">DEV</button></div>
     </header>
 
     <section class="workspace">
       <aside class="left-rail panel-cut">
-        <div class="section-heading"><span>01</span><div>LOCAL TELEMETRY<small>LIVE LINUX DATA</small></div></div>
+        <div class="section-heading"><span>01</span><div>SERVER CENTRAL<small>PROXMOX TELEMETRY</small></div></div>
         <div class="metric-stack">
           <article class="metric" data-metric="cpu">
             <div class="metric-orbit" style="--value:0"><span id="cpu-value">--</span><small>%</small></div>
-            <div class="metric-copy"><span>PROCESSOR</span><strong>CPU LOAD</strong><div class="mini-track"><i id="cpu-track"></i></div></div>
+            <div class="metric-copy"><span>PROCESSOR</span><strong>CPU LOAD</strong><canvas class="metric-sparkline" id="cpu-sparkline" width="180" height="24"></canvas><div class="mini-track"><i id="cpu-track"></i></div></div>
           </article>
           <article class="metric" data-metric="memory">
             <div class="metric-orbit" style="--value:0"><span id="memory-value">--</span><small>%</small></div>
-            <div class="metric-copy"><span>VOLATILE MEMORY</span><strong id="memory-detail">-- / --</strong><div class="mini-track"><i id="memory-track"></i></div></div>
+            <div class="metric-copy"><span>VOLATILE MEMORY</span><strong id="memory-detail">-- / --</strong><canvas class="metric-sparkline" id="memory-sparkline" width="180" height="24"></canvas><div class="mini-track"><i id="memory-track"></i></div></div>
           </article>
           <article class="metric" data-metric="disk">
             <div class="metric-orbit" style="--value:0"><span id="disk-value">--</span><small>%</small></div>
-            <div class="metric-copy"><span>ROOT STORAGE</span><strong id="disk-detail">-- / --</strong><div class="mini-track"><i id="disk-track"></i></div></div>
+            <div class="metric-copy"><span>ROOT STORAGE</span><strong id="disk-detail">-- / --</strong><canvas class="metric-sparkline" id="disk-sparkline" width="180" height="24"></canvas><div class="mini-track"><i id="disk-track"></i></div></div>
           </article>
         </div>
 
@@ -47,6 +50,8 @@ export const appTemplate = `
           <div><span>LOAD VECTOR</span><strong id="load-vector">-- / -- / --</strong></div>
           <div><span>KERNEL</span><strong id="kernel">--</strong></div>
         </div>
+
+        ${securityTelemetryPanel()}
       </aside>
 
       <section class="core-stage">
@@ -55,53 +60,9 @@ export const appTemplate = `
         <div class="coordinate coordinate-s">S // 180</div>
         <div class="coordinate coordinate-w">W // 270</div>
 
-        <div class="core-shell" aria-label="Núcleo de estado JARVIS">
-          <div class="core-crosshair"></div>
-          <div class="orbit orbit-1"><i></i><i></i><i></i></div>
-          <div class="orbit orbit-2"><i></i><i></i></div>
-          <div class="orbit orbit-3"></div>
-          <svg class="core-svg" viewBox="0 0 600 600" aria-hidden="true">
-            <defs>
-              <filter id="soft-glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-            </defs>
-            <circle class="radar-field" cx="300" cy="300" r="274"/>
-            <circle class="ring ring-a" cx="300" cy="300" r="248"/>
-            <circle class="ring ring-b" cx="300" cy="300" r="218"/>
-            <circle class="ring ring-c" cx="300" cy="300" r="180"/>
-            <circle class="ring ring-d" cx="300" cy="300" r="142"/>
-            <circle class="ticks ticks-outer" cx="300" cy="300" r="262"/>
-            <circle class="ticks ticks-inner" cx="300" cy="300" r="164"/>
-            <path class="arc arc-a" d="M 103 300 A 197 197 0 0 1 203 130"/>
-            <path class="arc arc-b" d="M 467 196 A 197 197 0 0 1 487 362"/>
-            <path class="arc arc-c" d="M 217 452 A 175 175 0 0 1 131 340"/>
-            <g class="radar-sweep"><path d="M300 300 L300 37 A263 263 0 0 1 388 52 Z"/></g>
-          </svg>
-          <div class="core-heart">
-            <div class="heart-lattice"></div>
-            <div class="heart-ring"></div>
-            <div class="heart-energy"></div>
-            <div class="heart-mark">J</div>
-          </div>
-          <div class="orbital-node node-a"><span>01</span></div>
-          <div class="orbital-node node-b"><span>07</span></div>
-          <div class="orbital-node node-c"><span>42</span></div>
-        </div>
-
-        <div class="state-banner">
-          <span class="state-index">CORE STATE</span>
-          <strong id="state-label">SYSTEM // STANDBY</strong>
-          <i></i>
-        </div>
-
-        <div class="wave-module">
-          <div class="wave-label"><span id="wave-mode">SIGNAL // AMBIENT</span><b id="wave-level">00.0 dB</b></div>
-          <canvas id="wave-canvas" width="900" height="108" aria-label="Visualizador de voz simulado"></canvas>
-        </div>
-
-        <div class="transcript-module">
-          <div class="transcript-line"><span>USER</span><p id="user-transcript">Awaiting operator input.</p></div>
-          <div class="transcript-line jarvis-line"><span>JARVIS</span><p id="jarvis-transcript">Local system interface initialized.</p></div>
-        </div>
+        ${stateVoicePanel()}
+        ${jarvisCore()}
+        ${coreStateAndTranscript()}
       </section>
 
       <aside class="right-rail panel-cut">
@@ -110,13 +71,15 @@ export const appTemplate = `
 
         <div class="section-heading stream-heading"><span>03</span><div>ACTIVITY STREAM<small>STRUCTURED EVENTS</small></div></div>
         <div class="activity-stream" id="activity-stream"></div>
+
+        ${securityAlertsPanel()}
       </aside>
     </section>
 
     <footer class="command-deck">
       <form id="command-form" class="command-line">
         <span>MANUAL INPUT</span>
-        <input id="command-input" autocomplete="off" placeholder="Enter a simulated instruction..." />
+        <input id="command-input" autocomplete="off" placeholder="Enter an instruction for Jarvis Core..." />
         <button type="submit">ROUTE</button>
       </form>
       <div class="dev-controls" id="dev-controls" aria-label="Controles de estados de demostración"></div>
@@ -131,6 +94,17 @@ export const appTemplate = `
         <div class="auth-impact"><span>IMPACT</span><p>Demonstrates policy and authorization flow. No executor is connected.</p></div>
         <div class="auth-actions"><button id="deny-action" class="deny">DENY</button><button id="approve-action">AUTHORIZE</button></div>
       </div>
+    </section>
+
+    <section class="authorization-modal" id="login-modal" aria-hidden="true">
+      <form class="auth-frame" id="login-form">
+        <span class="auth-code">LOCAL ACCESS // SECURE SESSION</span>
+        <h2>CONNECT TO JARVIS</h2>
+        <p>Enter the local Core access key. It is exchanged for an HttpOnly session and is not stored by the browser.</p>
+        <label class="login-field"><span>ACCESS KEY</span><input id="access-key" type="password" autocomplete="current-password" minlength="32" maxlength="4096" required /></label>
+        <p class="login-error" id="login-error" role="alert"></p>
+        <div class="auth-actions"><button type="button" id="cancel-login" class="deny">CANCEL</button><button type="submit">CONNECT</button></div>
+      </form>
     </section>
   </main>
 `;
