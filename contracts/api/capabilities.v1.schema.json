@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/api/capabilities.v1.schema.json",
+  "title": "Jarvis capability entry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "capability",
+    "tier",
+    "owner_agent",
+    "required_evidence",
+    "authorization"
+  ],
+  "properties": {
+    "capability": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9_.:-]+$"
+    },
+    "tier": {
+      "enum": [1, 2, 3]
+    },
+    "owner_agent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9_.:-]+$"
+    },
+    "required_evidence": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[a-z0-9_.:-]+$"
+      }
+    },
+    "authorization": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "tier": { "const": 1 } },
+        "required": ["tier"]
+      },
+      "then": {
+        "properties": {
+          "authorization": { "$ref": "#/$defs/noneAuthorization" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "tier": { "const": 2 } },
+        "required": ["tier"]
+      },
+      "then": {
+        "properties": {
+          "authorization": { "$ref": "#/$defs/singleGrantAuthorization" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "tier": { "const": 3 } },
+        "required": ["tier"]
+      },
+      "then": {
+        "properties": {
+          "authorization": { "$ref": "#/$defs/typedConfirmationAuthorization" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "noneAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "none" }
+      }
+    },
+    "singleGrantAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "expiry_seconds"],
+      "properties": {
+        "type": { "const": "single_grant" },
+        "expiry_seconds": { "const": 300 }
+      }
+    },
+    "typedConfirmationAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "expiry_seconds", "required_field"],
+      "properties": {
+        "type": { "const": "typed_confirmation" },
+        "expiry_seconds": { "const": 120 },
+        "required_field": { "const": "rollback_plan" }
+      }
+    }
+  }
+}
