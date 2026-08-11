@@ -15,6 +15,7 @@ export interface VoiceClientCallbacks {
 }
 
 export class VoiceCaptureClient {
+  private readonly conversationId = crypto.randomUUID();
   private socket: WebSocket | null = null;
   private recorder: MediaRecorder | null = null;
   private sessionId: string | null = null;
@@ -28,7 +29,7 @@ export class VoiceCaptureClient {
     if (this.socket || this.recorder) return;
     const mimeType = preferredVoiceMimeType();
     if (!mimeType) throw new Error("Opus recording is unavailable");
-    const sessionId = crypto.randomUUID();
+    const sessionId = this.conversationId;
     const socket = new WebSocket(this.runtime.voiceWebsocketUrl());
     socket.binaryType = "arraybuffer";
     this.socket = socket;
@@ -100,6 +101,10 @@ export class VoiceCaptureClient {
         recorder.stop();
       });
     }
+    // Chromium can dispatch the final dataavailable callback just after the
+    // recorder's stop event. Give it a turn before waiting for the send queue;
+    // otherwise Core receives a truncated WebM and STT reports unavailable.
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 100));
     await this.sendQueue;
     const socket = this.socket;
     const sessionId = this.sessionId;
