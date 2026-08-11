@@ -13,7 +13,7 @@ Jarvis Core is the security and policy boundary behind the future single Desktop
 - mandatory authorization boundary for protected actions;
 - restricted executor trait with verified-result requirement;
 - sanitized audit events;
-- mock-only conversation response.
+- routed conversation responses through configured private services, with a fail-closed mock fallback when no conversation service is installed.
 - exact HTTP routes for health and Core requests;
 - opaque transport authentication interface;
 - body-size, content-type, method and request-deadline controls;
@@ -37,7 +37,7 @@ The included Bearer adapter accepts only opaque credentials of at least 32 bytes
 
 No provider, model, n8n, OpenBao, shell or infrastructure adapter is connected.
 
-The deployed executor is intentionally disabled. The health route and mock conversation path can be exercised, but no action can execute until a capability-specific executor passes a separate review.
+The deployed executor is intentionally disabled. Health, governed conversation, telemetry and read-only security alert paths can be exercised, but no infrastructure action can execute until a capability-specific executor passes a separate review.
 
 WebSocket startup additionally requires `JARVIS_WEB_ORIGIN` as one exact HTTPS origin without a trailing slash. The gateway fails closed when missing, rejects anonymous or cross-origin upgrades and does not provide a browser authentication bypass.
 

@@ -6,7 +6,7 @@ Jarvis Core provides the single versioned HTTPS/WSS boundary for the Web UI and 
 
 Requests carry api_version, request_id, session_id and exactly one supported body kind:
 
-- conversation: bounded text accepted by a mock-only path in this phase;
+- conversation: bounded text routed to configured private model, Codex or read-only security services;
 - action: a capability, target and non-sensitive structured parameters.
 
 Authentication is transport metadata, not a body field. Unknown JSON fields, invalid identifiers, oversized/deep parameters and secret-shaped action fields are rejected before policy evaluation.
@@ -30,7 +30,10 @@ The canonical Phase 2 routes are:
 - GET `/api/v1/health`: aggregate operational health and canonical JARVIS state;
 - GET `/api/v1/agents`: authenticated normalized agent inventory;
 - GET `/api/v1/session`: authenticated browser session status and CSRF value;
+- POST `/api/v1/session`: exchange an existing operator access key for a bounded browser session;
+- DELETE `/api/v1/session`: revoke the current browser session;
 - POST `/api/v1/requests`: authenticated Core request processing.
+- POST `/api/v1/voice/alert`: synthesize a bounded security announcement for an authenticated client.
 
 Compatibility routes retained temporarily are:
 
@@ -49,4 +52,4 @@ The initial real Authenticator maps hashed opaque Bearer credentials to server-o
 
 The aggregate health endpoint reports unavailable components honestly. It does not turn placeholders into healthy mock agents. The authenticated agent endpoint returns the same normalized inventory for future realtime snapshots.
 
-There is deliberately no public session-creation route. Session issuance belongs to a future trusted identity adapter. Cookie-authenticated POST requests require the exact Origin and `X-Jarvis-CSRF`; Bearer-authenticated service requests retain their existing transport boundary.
+There is no anonymous session-creation route. The private Web UI can exchange an existing high-entropy operator access key for an opaque HttpOnly session. Cookie-authenticated writes, including alert synthesis, require the exact Origin and `X-Jarvis-CSRF`; Bearer-authenticated service requests retain their existing transport boundary. OIDC or WebAuthn remains the preferred replacement for this bootstrap exchange.

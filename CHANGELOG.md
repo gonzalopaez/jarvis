@@ -31,9 +31,18 @@ All notable changes follow Keep a Changelog principles and semantic versioning.
 - Internal Nginx TLS ingress configuration for the private Core listener.
 - Desktop-owned HTTPS Core client with runtime credential loading, health polling and real conversation routing to the mock-only Core path.
 - Read-only CI for Core, Desktop frontend, JSON contracts and secret scanning.
+- Read-only security conversation responses that summarize recent deduplicated Wazuh/Prometheus alerts with critical-only and host/availability filters.
+- Prometheus availability poller that normalizes service-down targets into Event Bus security alerts on the up->down transition only, avoiding repeated identical events.
+- Bounded, authenticated `POST /api/v1/voice/alert` endpoint for security announcement synthesis, gated by exact Origin and CSRF for cookie sessions.
+- Session-scoped, single-use Codex remediation confirmation that expires after five minutes and neither authorizes nor executes any infrastructure change.
+- Browser critical-alert voice announcement with a single coalesced synthesis request and an autoplay-unlock fallback.
+- Stable per-conversation voice identifier so follow-up microphone turns stay scoped to the same conversation.
+- Responsive Web UI layouts for small (<=760px) and very small (<=420px) viewports.
 
 ### Changed
 
+- Wazuh relay prioritizes critical/high alerts within a larger scan window and deduplicates alerts by id.
+- Security routing no longer treats generic words ("caido", "dominio", short tokens like "dc") as security intent without a service/host context, reducing false positives.
 - Agent Matrix now uses the normalized service-state vocabulary and reports unavailable integrations as real offline boundaries rather than simulated staged values.
 - Idle, offline and background UI rendering avoids continuous canvas/CSS animation; active waveform rendering is rate-limited.
 - The Web UI is responsive below the former fixed 1180px desktop minimum.

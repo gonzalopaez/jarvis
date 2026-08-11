@@ -424,6 +424,9 @@ mod speech_tests {
 
     #[test]
     fn removes_markdown_markers_for_tts_only() {
-        assert_eq!(strip_markdown_for_speech("**CPU** *normal* `read-only`"), "CPU normal read-only");
+        assert_eq!(
+            strip_markdown_for_speech("**CPU** *normal* `read-only`"),
+            "CPU normal read-only"
+        );
     }
 }

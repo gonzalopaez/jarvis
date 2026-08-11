@@ -1,12 +1,15 @@
 use crate::{
     AiMode, CapabilityRequest, CapabilityRoute, CapabilityRouter, CoreRequest, CoreResponse,
-    DeterministicCapabilityRouter, EventBus, EventType, RequestSource, ResponseStatus, API_VERSION,
+    DeterministicCapabilityRouter, EventBus, EventType, RequestSource, ResponseStatus,
+    RoutingDecision, API_VERSION,
 };
 use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
+    collections::{HashMap, HashSet},
     sync::atomic::{AtomicU64, Ordering},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -14,6 +17,28 @@ use crate::VoicePipeline;
 
 static CONVERSATION_AUDIT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const MAX_CODEX_RESPONSE_BYTES: usize = 128 * 1024;
+const MAX_PENDING_MITIGATIONS: usize = 128;
+const PENDING_MITIGATION_TTL: Duration = Duration::from_secs(5 * 60);
+
+fn is_affirmative(message: &str) -> bool {
+    matches!(
+        message.trim().to_lowercase().as_str(),
+        "si" | "sí" | "sí." | "si."
+    )
+}
+
+fn security_remediation_decision() -> RoutingDecision {
+    RoutingDecision {
+        route: CapabilityRoute::Codex,
+        intent: "security_remediation",
+        complexity: crate::Complexity::High,
+        agent: Some("codex"),
+        model_alias: None,
+        requires_tools: true,
+        requires_authorization: true,
+        reason: "operator confirmed security mitigation handoff",
+    }
+}
 
 #[derive(Clone)]
 pub struct ConversationService {
@@ -21,6 +46,7 @@ pub struct ConversationService {
     models: VoicePipeline,
     codex: Option<CodexHttpClient>,
     events: EventBus,
+    pending_mitigation: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 impl ConversationService {
@@ -30,17 +56,21 @@ impl ConversationService {
             models,
             codex,
             events,
+            pending_mitigation: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub async fn handle(&self, request: &CoreRequest) -> CoreResponse {
         let message = request.message.as_deref().unwrap_or_default();
-        let decision = self.router.decide(&CapabilityRequest {
+        let mut decision = self.router.decide(&CapabilityRequest {
             message: message.into(),
             session_id: request.session_id.clone(),
             source: RequestSource::Text,
             mode: AiMode::Auto,
         });
+        if is_affirmative(message) && self.take_pending_mitigation(&request.session_id) {
+            decision = security_remediation_decision();
+        }
         let correlation = Some(request.request_id.clone());
         self.events.publish(EventType::RouterDecision, correlation.clone(), json!({
             "route": decision.route, "intent": decision.intent, "complexity": decision.complexity,
@@ -85,20 +115,16 @@ impl ConversationService {
                         })
                 }
             },
-            CapabilityRoute::InfrastructureAgent => match self.codex_response(request, decision.intent).await {
-                Ok(result) => Ok(result),
-                Err(_) => Err((
-                    "INFRASTRUCTURE_AGENT_UNAVAILABLE",
-                    "Infrastructure Agent could not obtain verified data",
-                )),
-            },
-            CapabilityRoute::SecurityAgent => match self.codex_response(request, decision.intent).await {
-                Ok(result) => Ok(result),
-                Err(_) => Err((
-                    "SECURITY_AGENT_UNAVAILABLE",
-                    "Security Agent could not obtain verified Wazuh data",
-                )),
-            },
+            CapabilityRoute::InfrastructureAgent => {
+                match self.codex_response(request, decision.intent).await {
+                    Ok(result) => Ok(result),
+                    Err(_) => Err((
+                        "INFRASTRUCTURE_AGENT_UNAVAILABLE",
+                        "Infrastructure Agent could not obtain verified data",
+                    )),
+                }
+            }
+            CapabilityRoute::SecurityAgent => self.security_response(request),
             CapabilityRoute::Automation => Err((
                 "AUTOMATION_UNAVAILABLE",
                 "Automation routing is not connected",
@@ -131,6 +157,148 @@ impl ConversationService {
                 )
             }
         }
+    }
+
+    fn security_response(
+        &self,
+        request: &CoreRequest,
+    ) -> Result<(String, &'static str), (&'static str, &'static str)> {
+        let availability_text = request
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase()
+            .chars()
+            .map(|character| if character == 'í' { 'i' } else { character })
+            .collect::<String>();
+        let critical_only = availability_text.contains("critic");
+        let availability_only = availability_text.contains("caido")
+            || availability_text.contains("caida")
+            || availability_text.contains("servicio")
+            || availability_text.contains("servidor");
+        let target_query = availability_text;
+        let target = if target_query.contains("vpn") || target_query.contains("uve pene") {
+            Some("vpn")
+        } else if target_query.contains("cloudflare") || target_query.contains("tunnel") {
+            Some("tunnel")
+        } else if target_query.contains("dc") || target_query.contains("de ce") {
+            Some("dc")
+        } else if target_query.contains("freeipa") {
+            Some("freeipa")
+        } else if target_query.contains("adguard") {
+            Some("adguard")
+        } else if target_query.contains("tailscale") {
+            Some("tailscale")
+        } else {
+            None
+        };
+        let mut seen = HashSet::new();
+        let mut alerts = self
+            .events
+            .recent_security_events()
+            .into_iter()
+            .filter(|event| event.event_type == "security.alert")
+            .filter_map(|event| {
+                let id = event.payload.get("id")?.as_str()?.to_owned();
+                if !seen.insert(id.clone()) {
+                    return None;
+                }
+                let severity = event.payload.get("severity")?.as_str()?.to_lowercase();
+                if critical_only && severity != "critical" {
+                    return None;
+                }
+                let title = event.payload.get("title")?.as_str()?.to_owned();
+                let description = event
+                    .payload
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let host = event
+                    .payload
+                    .get("host")
+                    .and_then(Value::as_str)
+                    .unwrap_or("host desconocido")
+                    .to_owned();
+                if availability_only
+                    && !title.to_lowercase().contains("caído")
+                    && !title.to_lowercase().contains("caido")
+                    && !description
+                        .to_lowercase()
+                        .contains("prometheus reporta down")
+                {
+                    return None;
+                }
+                if let Some(target) = target {
+                    let host = host.to_lowercase();
+                    let matches = match target {
+                        "vpn" => {
+                            host.contains("vpn")
+                                || host.contains("tunnel")
+                                || host.contains("tailscale")
+                        }
+                        "tunnel" => host.contains("tunnel") || host.contains("cloudflare"),
+                        value => host.contains(value),
+                    };
+                    if !matches {
+                        return None;
+                    }
+                }
+                Some((severity, host, title))
+            })
+            .collect::<Vec<_>>();
+        alerts.reverse();
+        let window = if availability_only {
+            "de disponibilidad"
+        } else if critical_only {
+            "críticas"
+        } else {
+            "recientes"
+        };
+        if alerts.is_empty() {
+            return Ok((
+                format!("No hay alertas Wazuh {window} en la ventana de eventos disponible.",),
+                "security",
+            ));
+        }
+        let mut answer = format!("Hay {} alertas Wazuh {window}. ", alerts.len());
+        for (index, (severity, host, title)) in alerts.drain(..).take(5).enumerate() {
+            if index > 0 {
+                answer.push(' ');
+            }
+            answer.push_str(&format!("{}: {} en {}.", severity, title, host));
+        }
+        if !availability_only {
+            if let Ok(mut pending) = self.pending_mitigation.lock() {
+                let now = Instant::now();
+                pending.retain(|_, created| now.duration_since(*created) <= PENDING_MITIGATION_TTL);
+                if pending.len() >= MAX_PENDING_MITIGATIONS
+                    && !pending.contains_key(&request.session_id)
+                {
+                    if let Some(oldest) = pending
+                        .iter()
+                        .min_by_key(|(_, created)| **created)
+                        .map(|(session, _)| session.clone())
+                    {
+                        pending.remove(&oldest);
+                    }
+                }
+                pending.insert(request.session_id.clone(), now);
+            }
+            answer
+                .push_str(" ¿Querés que evaluemos cómo mitigar el riesgo aumentando la seguridad?");
+        }
+        Ok((answer, "security"))
+    }
+
+    fn take_pending_mitigation(&self, session_id: &str) -> bool {
+        self.pending_mitigation
+            .lock()
+            .map(|mut pending| {
+                let now = Instant::now();
+                pending.retain(|_, created| now.duration_since(*created) <= PENDING_MITIGATION_TTL);
+                pending.remove(session_id).is_some()
+            })
+            .unwrap_or(false)
     }
 
     async fn model_response(
@@ -205,7 +373,14 @@ impl ConversationService {
                     correlation,
                     codex_agent("READY", "healthy", None),
                 );
-                Ok((output, "expert"))
+                if intent == "security_remediation" {
+                    Ok((
+                        format!("Ya se lo pasé a Codex para evaluar la remediación de seguridad. {output}"),
+                        "expert",
+                    ))
+                } else {
+                    Ok((output, "expert"))
+                }
             }
             Err(CodexClientError::Timeout) => {
                 self.events.publish(
@@ -386,4 +561,99 @@ pub enum CodexClientError {
     Unavailable,
     InvalidResponse,
     Timeout,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::VoicePipelineConfig;
+
+    fn service(events: EventBus) -> ConversationService {
+        let voice = VoicePipeline::new(VoicePipelineConfig {
+            voice_base_url: "http://voice.internal/".parse().expect("voice URL"),
+            voice_token: "v".repeat(32),
+            litellm_base_url: "http://litellm.internal/".parse().expect("LiteLLM URL"),
+            litellm_token: "l".repeat(20),
+            model: "jarvis-fast".into(),
+        })
+        .expect("voice configuration");
+        ConversationService::new(voice, None, events)
+    }
+
+    fn request(session_id: &str, message: &str) -> CoreRequest {
+        CoreRequest {
+            api_version: API_VERSION.into(),
+            request_id: format!("request-{session_id}"),
+            session_id: session_id.into(),
+            kind: "conversation".into(),
+            message: Some(message.into()),
+            action: None,
+        }
+    }
+
+    #[test]
+    fn security_answers_use_recent_deduplicated_alerts() {
+        let events = EventBus::default();
+        for _ in 0..2 {
+            events.publish(
+                EventType::SecurityAlert,
+                None,
+                json!({
+                    "id": "wazuh-42",
+                    "host": "vpn-01",
+                    "severity": "critical",
+                    "title": "Servicio caído",
+                    "description": "Prometheus reporta down"
+                }),
+            );
+        }
+        let service = service(events);
+
+        let (answer, mode) = service
+            .security_response(&request("session-a", "¿Está caído el servidor VPN?"))
+            .expect("security response");
+
+        assert_eq!(mode, "security");
+        assert!(answer.contains("Hay 1 alertas Wazuh de disponibilidad"));
+        assert!(answer.contains("vpn-01"));
+    }
+
+    #[test]
+    fn mitigation_confirmation_is_strictly_session_scoped_and_one_time() {
+        let events = EventBus::default();
+        events.publish(
+            EventType::SecurityAlert,
+            None,
+            json!({
+                "id": "wazuh-43",
+                "host": "dc-01",
+                "severity": "critical",
+                "title": "Intentos de acceso",
+                "description": "Múltiples accesos fallidos"
+            }),
+        );
+        let service = service(events);
+        service
+            .security_response(&request("session-a", "Mostrame las alertas críticas"))
+            .expect("security response");
+
+        assert!(!service.take_pending_mitigation("session-b"));
+        assert!(service.take_pending_mitigation("session-a"));
+        assert!(!service.take_pending_mitigation("session-a"));
+    }
+
+    #[test]
+    fn expired_mitigation_confirmation_is_rejected() {
+        let service = service(EventBus::default());
+        service
+            .pending_mitigation
+            .lock()
+            .expect("pending mitigations")
+            .insert(
+                "session-a".into(),
+                Instant::now() - PENDING_MITIGATION_TTL - Duration::from_secs(1),
+            );
+
+        assert!(!service.take_pending_mitigation("session-a"));
+    }
 }

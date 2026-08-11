@@ -9,10 +9,10 @@ mod executor;
 mod gateway;
 mod policy;
 mod routing;
-mod session;
-mod telemetry;
 #[cfg(feature = "network-server")]
 mod security;
+mod session;
+mod telemetry;
 mod transport;
 mod validation;
 #[cfg(feature = "network-server")]
@@ -45,20 +45,20 @@ pub use routing::{
     AiMode, CapabilityRequest, CapabilityRoute, CapabilityRouter, Complexity,
     DeterministicCapabilityRouter, RequestSource, RoutingDecision,
 };
+#[cfg(feature = "network-server")]
+pub use security::WazuhSecurityPoller;
 pub use session::{
     IssuedSession, SessionConfigError, SessionIssueError, SessionStore, DEFAULT_MAX_SESSIONS,
     DEFAULT_SESSION_TTL, MAX_SESSIONS, SESSION_COOKIE_NAME,
 };
 #[cfg(feature = "network-server")]
-pub use telemetry::PrometheusTelemetryAdapter;
+pub use telemetry::{run_prometheus_availability_until, PrometheusTelemetryAdapter};
 pub use telemetry::{
     OperationalTelemetry, TelemetryAdapter, TelemetryAdapterError, TelemetryService,
     TelemetryServiceConfigError, TelemetrySource, TelemetryValidationError, TemperatureReading,
     UnavailableTelemetryAdapter, DEFAULT_TELEMETRY_ADAPTER_TIMEOUT, DEFAULT_TELEMETRY_INTERVAL,
     MAX_TELEMETRY_INTERVAL, MIN_TELEMETRY_INTERVAL,
 };
-#[cfg(feature = "network-server")]
-pub use security::WazuhSecurityPoller;
 #[cfg(feature = "network-server")]
 pub use transport::{bind_private, serve, serve_until, PrivateListener};
 pub use transport::{

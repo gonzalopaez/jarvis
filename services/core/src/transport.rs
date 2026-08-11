@@ -12,7 +12,7 @@ use http::{
 };
 use http_body::Body;
 use http_body_util::{BodyExt, Full, Limited};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -20,11 +20,9 @@ use std::{
 };
 
 #[cfg(feature = "network-server")]
-use futures_util::{SinkExt, StreamExt};
-#[cfg(feature = "network-server")]
 use crate::EventType;
 #[cfg(feature = "network-server")]
-use std::future::Future;
+use futures_util::{SinkExt, StreamExt};
 #[cfg(feature = "network-server")]
 use hyper::{body::Incoming, server::conn::http1, service::service_fn};
 #[cfg(feature = "network-server")]
@@ -32,9 +30,13 @@ use hyper_util::rt::TokioIo;
 #[cfg(feature = "network-server")]
 use std::convert::Infallible;
 #[cfg(feature = "network-server")]
+use std::future::Future;
+#[cfg(feature = "network-server")]
 use tokio::net::TcpListener;
 
 const CSRF_HEADER: &str = "x-jarvis-csrf";
+#[cfg(feature = "network-server")]
+const MAX_ALERT_AUDIO_REQUEST_BYTES: usize = 8 * 1024;
 
 #[cfg(feature = "network-server")]
 const WEBSOCKET_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(25);
@@ -221,12 +223,108 @@ where
             (&Method::POST, "/v1/requests" | "/api/v1/requests") => {
                 self.handle_core_request(request).await
             }
+            (&Method::POST, "/api/v1/voice/alert") => self.handle_alert_audio(request).await,
             (_, "/v1/health") => method_not_allowed("GET"),
             (_, "/api/v1/health" | "/api/v1/agents") => method_not_allowed("GET"),
             (_, "/api/v1/session") => method_not_allowed("GET, POST, DELETE"),
             (_, "/ws" | "/ws/voice") => method_not_allowed("GET"),
             (_, "/v1/requests" | "/api/v1/requests") => method_not_allowed("POST"),
+            (_, "/api/v1/voice/alert") => method_not_allowed("POST"),
             _ => transport_error(StatusCode::NOT_FOUND, "NOT_FOUND", "Route not found"),
+        }
+    }
+
+    #[cfg(feature = "network-server")]
+    async fn handle_alert_audio<B>(&self, request: Request<B>) -> Response<ResponseBody>
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        let uses_bearer = request.headers().contains_key(AUTHORIZATION);
+        if self.authenticate(request.headers()).is_err() {
+            return transport_error(
+                StatusCode::UNAUTHORIZED,
+                "AUTHENTICATION_REQUIRED",
+                "Valid authentication is required",
+            );
+        }
+        if !uses_bearer && !self.valid_session_write(request.headers()) {
+            return transport_error(
+                StatusCode::FORBIDDEN,
+                "CSRF_REJECTED",
+                "Session request validation failed",
+            );
+        }
+        if !is_json(request.headers()) {
+            return transport_error(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "JSON_REQUIRED",
+                "Content-Type must be application/json",
+            );
+        }
+        if content_length_exceeds(request.headers(), MAX_ALERT_AUDIO_REQUEST_BYTES) {
+            return transport_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "PAYLOAD_TOO_LARGE",
+                "Alert audio request exceeds the configured limit",
+            );
+        }
+        let Some(voice) = &self.voice else {
+            return transport_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "VOICE_SERVICE_UNAVAILABLE",
+                "Voice service is unavailable",
+            );
+        };
+        let body = Limited::new(request.into_body(), MAX_ALERT_AUDIO_REQUEST_BYTES).collect();
+        let body = match tokio::time::timeout(self.config.request_timeout, body).await {
+            Ok(Ok(body)) => body.to_bytes(),
+            Ok(Err(_)) => {
+                return transport_error(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "PAYLOAD_TOO_LARGE",
+                    "Alert audio request exceeds the configured limit",
+                )
+            }
+            Err(_) => {
+                return transport_error(
+                    StatusCode::REQUEST_TIMEOUT,
+                    "REQUEST_TIMEOUT",
+                    "Request body deadline exceeded",
+                )
+            }
+        };
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct AlertAudioRequest {
+            text: String,
+        }
+        let Ok(payload) = serde_json::from_slice::<AlertAudioRequest>(&body) else {
+            return transport_error(
+                StatusCode::BAD_REQUEST,
+                "INVALID_REQUEST",
+                "Alert audio request is invalid",
+            );
+        };
+        if payload.text.trim().is_empty() || payload.text.len() > 2 * 1024 {
+            return transport_error(
+                StatusCode::BAD_REQUEST,
+                "INVALID_REQUEST",
+                "Alert text is invalid",
+            );
+        }
+        match voice.synthesize_text(&payload.text).await {
+            Ok(audio) => Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "audio/wav")
+                .header("cache-control", "no-store")
+                .body(Full::new(Bytes::from(audio)))
+                .expect("audio response metadata is valid"),
+            Err(_) => transport_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "TTS_UNAVAILABLE",
+                "Voice synthesis is unavailable",
+            ),
         }
     }
 

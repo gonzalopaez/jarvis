@@ -20,6 +20,7 @@ struct RelayResponse {
 #[derive(Debug, Deserialize)]
 struct Alert {
     id: String,
+    #[serde(default)]
     host: String,
     timestamp_ms: u64,
     severity: String,
@@ -40,7 +41,11 @@ impl WazuhSecurityPoller {
         Ok(Self { client, url, token })
     }
 
-    pub async fn run_until(self, events: EventBus, shutdown: impl std::future::Future<Output = ()>) {
+    pub async fn run_until(
+        self,
+        events: EventBus,
+        shutdown: impl std::future::Future<Output = ()>,
+    ) {
         let mut interval = tokio::time::interval(Duration::from_secs(10));
         tokio::pin!(shutdown);
         loop {
@@ -52,23 +57,52 @@ impl WazuhSecurityPoller {
     }
 
     async fn collect(&self, events: &EventBus) {
-        let response = self.client.get(self.url.clone()).bearer_auth(&self.token).send().await;
+        let response = self
+            .client
+            .get(self.url.clone())
+            .bearer_auth(&self.token)
+            .send()
+            .await;
         let Ok(response) = response else {
-            events.publish(EventType::TelemetrySourceStatus, None, json!({"source":"wazuh","status":"unavailable"}));
+            events.publish(
+                EventType::TelemetrySourceStatus,
+                None,
+                json!({"source":"wazuh","status":"unavailable"}),
+            );
             return;
         };
+        if !response.status().is_success() {
+            events.publish(
+                EventType::TelemetrySourceStatus,
+                None,
+                json!({"source":"wazuh","status":"rejected"}),
+            );
+            return;
+        }
         let Ok(body) = response.json::<RelayResponse>().await else {
-            events.publish(EventType::TelemetrySourceStatus, None, json!({"source":"wazuh","status":"rejected"}));
+            events.publish(
+                EventType::TelemetrySourceStatus,
+                None,
+                json!({"source":"wazuh","status":"rejected"}),
+            );
             return;
         };
-        events.publish(EventType::TelemetrySourceStatus, None, json!({"source":"wazuh","status":"healthy"}));
+        events.publish(
+            EventType::TelemetrySourceStatus,
+            None,
+            json!({"source":"wazuh","status":"healthy"}),
+        );
         events.publish(EventType::SecurityTelemetryUpdated, None, body.metrics);
         for alert in body.alerts.into_iter().take(20) {
-            events.publish(EventType::SecurityAlert, None, json!({
-                "id": alert.id, "host": alert.host, "timestamp_ms": alert.timestamp_ms,
-                "severity": alert.severity, "title": alert.title,
-                "description": alert.description
-            }));
+            events.publish(
+                EventType::SecurityAlert,
+                None,
+                json!({
+                    "id": alert.id, "host": alert.host, "timestamp_ms": alert.timestamp_ms,
+                    "severity": alert.severity, "title": alert.title,
+                    "description": alert.description
+                }),
+            );
         }
     }
 }

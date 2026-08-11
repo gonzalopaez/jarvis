@@ -43,7 +43,7 @@ The browser consumes only normalized `telemetry.snapshot` events through the aut
 
 The initial retention is bounded to seven days and 2 GB because CT127 has a 4 GB root volume. Increase the disk before increasing either retention limit. One vCPU and 2 GB RAM are sufficient for the current seven-node scrape set; capacity should be revisited if cardinality, scrape targets, or recording rules grow materially.
 
-Wazuh security normalization belongs to the Security Service phase. It will share the Event Bus but not the operational metric model.
+The read-only Wazuh relay and Prometheus availability poller normalize security and service-down alerts into the same bounded Event Bus. Jarvis can summarize recent deduplicated alerts, filter critical or host-specific availability events, and offer a separately confirmed Codex remediation assessment. The confirmation is scoped to one conversation, expires after five minutes and does not authorize or execute an infrastructure change.
 # Wazuh security telemetry
 
 JARVIS recibe alertas de Wazuh mediante un relay interno de solo lectura en
@@ -55,3 +55,7 @@ relay en segundo plano y publica `telemetry.source.status`,
 El navegador nunca accede a Wazuh, al indexer ni al relay. No se habilitan
 acciones de respuesta desde este canal: las alertas son únicamente observación y
 cualquier acción futura deberá atravesar Policy/Authorization/MCP.
+
+El Core debe definir `JARVIS_WAZUH_RELAY_URL` y cargar la credencial systemd
+`wazuh-relay-token`. Si se configura la URL pero la credencial falta o es inválida,
+el Core falla al iniciar; esto evita operar sin alertas de forma inadvertida.

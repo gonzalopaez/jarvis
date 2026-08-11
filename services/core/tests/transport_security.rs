@@ -470,6 +470,83 @@ async fn unsupported_content_type_is_rejected() {
 }
 
 #[tokio::test]
+async fn alert_audio_requires_csrf_for_cookie_sessions_and_json_for_bearer() {
+    let transport = websocket_transport(Some("https://jarvis.example.internal"));
+    let issued = transport
+        .session_store()
+        .issue(jarvis_core::Principal {
+            subject: "browser:test".into(),
+            roles: vec!["desktop".into()],
+        })
+        .expect("session");
+    let cookie = issued.cookie_header();
+
+    let without_csrf = Request::builder()
+        .method(Method::POST)
+        .uri("/api/v1/voice/alert")
+        .header(header::COOKIE, &cookie)
+        .header(header::ORIGIN, "https://jarvis.example.internal")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Full::new(Bytes::from_static(
+            br#"{"text":"Alerta critica"}"#,
+        )))
+        .expect("request");
+    assert_eq!(
+        transport.handle(without_csrf).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    let wrong_type = Request::builder()
+        .method(Method::POST)
+        .uri("/api/v1/voice/alert")
+        .header(header::AUTHORIZATION, "Test desktop")
+        .header(header::CONTENT_TYPE, "text/plain")
+        .body(Full::new(Bytes::from_static(b"alert")))
+        .expect("request");
+    assert_eq!(
+        transport.handle(wrong_type).await.status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE
+    );
+
+    let csrf = transport.session_store().csrf_token(&cookie).expect("csrf");
+    let accepted_boundary = Request::builder()
+        .method(Method::POST)
+        .uri("/api/v1/voice/alert")
+        .header(header::COOKIE, cookie)
+        .header(header::ORIGIN, "https://jarvis.example.internal")
+        .header("x-jarvis-csrf", csrf)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Full::new(Bytes::from_static(
+            br#"{"text":"Alerta critica"}"#,
+        )))
+        .expect("request");
+    assert_eq!(
+        transport.handle(accepted_boundary).await.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn alert_audio_rejects_declared_oversized_bodies_before_voice_dispatch() {
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/v1/voice/alert")
+        .header(header::AUTHORIZATION, "Test desktop")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CONTENT_LENGTH, "9000")
+        .body(Full::new(Bytes::from_static(br#"{"text":"alert"}"#)))
+        .expect("request");
+
+    assert_eq!(
+        transport(CountingExecutor::new())
+            .handle(request)
+            .await
+            .status(),
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+}
+
+#[tokio::test]
 async fn oversized_body_is_rejected() {
     let executor = CountingExecutor::new();
     let gateway = CoreGateway::new(

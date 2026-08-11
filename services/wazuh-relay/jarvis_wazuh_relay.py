@@ -26,10 +26,13 @@ def normalized(line):
 
 def read_alerts():
     try:
-        with open(ALERTS, encoding="utf-8", errors="replace") as f: lines = f.readlines()[-20:]
+        with open(ALERTS, encoding="utf-8", errors="replace") as f: lines = f.readlines()[-500:]
     except OSError: lines = []
     alerts = [a for line in lines if (a := normalized(line))]
-    return alerts[-10:]
+    important = [a for a in alerts if a["severity"] in {"critical", "high"}]
+    recent = alerts[-20:]
+    merged = {a["id"]: a for a in important + recent}
+    return list(merged.values())[-50:]
 
 def metrics(alerts):
     def count(*words):

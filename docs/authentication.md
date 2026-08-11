@@ -18,7 +18,7 @@ The Desktop loads its Core credential only in the native Tauri backend from `JAR
 
 ## Browser authentication boundary
 
-The Web UI never reads the transitional Bearer credential. Phase 2 exposes aggregate health without authentication and keeps `/api/v1/agents` and `/api/v1/requests` protected by the server Authenticator. Browser calls to protected routes therefore fail closed until a reviewed identity flow issues a short-lived server-side session.
+The Web UI never persists or places the transitional Bearer credential in browser storage. Aggregate health is public on the private origin, while agents, requests, realtime, voice and alert synthesis require a server-side session. The operator can exchange an existing access key once over same-origin HTTPS; JavaScript clears the form immediately and subsequently uses only the HttpOnly cookie plus an in-memory CSRF token.
 
 The Core now provides an in-memory bounded Session Store for a future trusted identity adapter. It issues 256-bit opaque identifiers, stores only their SHA-256 digests, limits TTL to 24 hours, supports revocation and returns cookies with `Secure`, `HttpOnly`, `SameSite=Strict` and a scoped path. Session state maps to a server-owned Principal; roles cannot come from browser JSON.
 

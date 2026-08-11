@@ -34,4 +34,6 @@ Voice Service exposes only `GET /v1/health`, authenticated `POST /v1/transcribe`
 
 The frontend drives `LISTENING`, `THINKING`, and `SPEAKING` from protocol events. During playback, Web Audio measures the actual TTS signal and feeds `voice.output.level`; there is no production fake waveform.
 
+The browser keeps one conversation identifier for successive microphone turns so follow-up answers remain scoped to the same conversation. Critical security events can request a bounded WAV announcement through authenticated `POST /api/v1/voice/alert`; cookie clients must provide the exact Origin and session CSRF token. Browser autoplay restrictions still require an operator interaction before queued audio can play.
+
 Deployment examples are in `deploy/systemd/jarvis-voice.service`, `jarvis-voice.env.example`, and the JARVIS Core systemd unit. Raw tokens must be provisioned outside Git. Core uses a scoped LiteLLM virtual key restricted to the selected conversational model.

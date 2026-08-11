@@ -7,6 +7,7 @@ Deployment artifacts contain no production addresses or credentials.
 - Install `nginx/jarvis-security-headers.conf` as `/etc/nginx/snippets/jarvis-security-headers.conf`. It is included again in static locations because Nginx does not inherit parent `add_header` directives when a location defines its own headers.
 - Build `apps/desktop` with `npm ci && npm run build` and install the generated `dist/` contents at `/usr/share/jarvis/web` on the Nginx workload. The browser receives static assets only; it does not receive Core credentials.
 - Provide `auth-registry.json` through the systemd `LoadCredential` source configured by the service unit. The registry contains only credential digests and server-owned identities; raw Bearer values remain outside Git.
+- Configure the Wazuh relay endpoint in `/etc/jarvis-core/environment` as `JARVIS_WAZUH_RELAY_URL=http://<wazuh-relay-private-address>:5515/`. Install the same randomly generated bearer token, with root-only permissions, at `/etc/jarvis-wazuh-relay/token` on the relay host and `/etc/jarvis-core/wazuh-relay-token` on the Core host. The Core unit loads the latter through `LoadCredential`.
 
 Validate the rendered Nginx configuration before reload and ensure the workload firewall permits port 4100 only from the proxy workload.
 

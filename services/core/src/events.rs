@@ -1,6 +1,10 @@
 use serde::Serialize;
 use serde_json::Value;
-use std::{collections::VecDeque, sync::{Arc, Mutex}, time::SystemTime};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+    time::SystemTime,
+};
 use tokio::sync::broadcast;
 
 pub const DEFAULT_EVENT_CAPACITY: usize = 256;
@@ -134,7 +138,9 @@ impl EventBus {
         let envelope = self.build(event_type, correlation_id, payload);
         if let Ok(mut history) = self.inner.history.lock() {
             history.push_back(envelope.clone());
-            while history.len() > 64 { history.pop_front(); }
+            while history.len() > 64 {
+                history.pop_front();
+            }
         }
         let _ = self.inner.sender.send(envelope.clone());
         envelope
@@ -171,9 +177,20 @@ impl EventBus {
     }
 
     pub fn recent_security_events(&self) -> Vec<EventEnvelope> {
-        self.inner.history.lock().map(|history| history.iter()
-            .filter(|event| event.event_type == "security.alert" || event.event_type == "security.telemetry.updated")
-            .cloned().collect()).unwrap_or_default()
+        self.inner
+            .history
+            .lock()
+            .map(|history| {
+                history
+                    .iter()
+                    .filter(|event| {
+                        event.event_type == "security.alert"
+                            || event.event_type == "security.telemetry.updated"
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 

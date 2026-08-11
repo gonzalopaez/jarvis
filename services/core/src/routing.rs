@@ -119,6 +119,51 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
             );
         }
 
+        let likely_security_alert_query = contains_any(&normalized, &["alerta", "alertas"])
+            && contains_any(
+                &normalized,
+                &[
+                    "critica",
+                    "criticas",
+                    "seguridad",
+                    "ultimos",
+                    "ultimo",
+                    "ultima",
+                    "minuto",
+                    "hora",
+                ],
+            );
+        // "caido"/"caida"/"dominio" are too generic to route on their own
+        // (e.g. "se me cayó el café", "el dominio de la función"). Only treat
+        // them as security-relevant when a service/host context is present.
+        let service_context = contains_any(
+            &normalized,
+            &[
+                "servicio",
+                "servidor",
+                "server",
+                "host",
+                "maquina",
+                "nodo",
+                "instancia",
+                "vpn",
+                "tunnel",
+                "cloudflare",
+                "tailscale",
+                "adguard",
+                "freeipa",
+                "proxmox",
+                "dominio",
+            ],
+        );
+        let service_down_query = service_context
+            && contains_any(
+                &normalized,
+                &["caido", "caida", "no responde", "inaccesible", "fuera de linea"],
+            );
+        let domain_controller_query = normalized.contains("controlador de dominio")
+            || normalized.contains("servidor de ce")
+            || contains_word(&tokens, "dc");
         if contains_any(
             &normalized,
             &[
@@ -139,22 +184,25 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
                 "scheduled or workflow intent",
             );
         }
-        if contains_any(
-            &normalized,
-            &[
-                "alerta de seguridad",
-                "alertas de seguridad",
-                "alertas criticas",
-                "alertas críticas",
-                "amenazas de seguridad",
-                "wazuh",
-                "vulnerabilidad",
-                "inicio de sesion fallido",
-                "failed login",
-                "incidente de seguridad",
-                "ioc ",
-            ],
-        ) {
+        if likely_security_alert_query
+            || service_down_query
+            || domain_controller_query
+            || contains_any(
+                &normalized,
+                &[
+                    "alerta de seguridad",
+                    "alertas de seguridad",
+                    "alertas criticas",
+                    "amenazas de seguridad",
+                    "wazuh",
+                    "vulnerabilidad",
+                    "inicio de sesion fallido",
+                    "failed login",
+                    "incidente de seguridad",
+                    "ioc ",
+                ],
+            )
+        {
             return agent(
                 CapabilityRoute::SecurityAgent,
                 "security_analysis",
@@ -307,6 +355,15 @@ fn contains_any(value: &str, signals: &[&str]) -> bool {
     signals.iter().any(|signal| value.contains(signal))
 }
 
+/// Whole-token match, so short signals like "dc" do not match by substring
+/// inside unrelated words. Tokens are normalized text split on whitespace;
+/// surrounding punctuation is trimmed before comparison.
+fn contains_word(tokens: &[&str], word: &str) -> bool {
+    tokens.iter().any(|token| {
+        token.trim_matches(|character: char| !character.is_alphanumeric()) == word
+    })
+}
+
 fn looks_like_code(value: &str) -> bool {
     value.contains("```")
         || value.contains("::")
@@ -368,8 +425,49 @@ mod tests {
             CapabilityRoute::SecurityAgent
         );
         assert_eq!(
+            route("Hay una alerta critica de Guaso en los ultimos 30 minutos").route,
+            CapabilityRoute::SecurityAgent
+        );
+        assert_eq!(
             route("Revisa el estado de Bluetooth").route,
             CapabilityRoute::InfrastructureAgent
+        );
+    }
+
+    #[test]
+    fn spoken_down_server_query_uses_security_agent() {
+        let decision = route("¿Está caído el servidor de ce?");
+        assert_eq!(decision.route, CapabilityRoute::SecurityAgent);
+    }
+
+    #[test]
+    fn generic_down_and_domain_words_do_not_route_to_security() {
+        // Without a service/host context these are ordinary conversation, not
+        // security queries.
+        assert_ne!(
+            route("Se me ha caído el café encima del teclado").route,
+            CapabilityRoute::SecurityAgent
+        );
+        assert_ne!(
+            route("Cuál es el dominio de la función logaritmo").route,
+            CapabilityRoute::SecurityAgent
+        );
+        // "dc" as a substring inside another word must not match.
+        assert_ne!(
+            route("Explicame el modelo de Bohr adecuado").route,
+            CapabilityRoute::SecurityAgent
+        );
+    }
+
+    #[test]
+    fn service_down_query_with_context_uses_security_agent() {
+        assert_eq!(
+            route("El servicio de VPN está caído").route,
+            CapabilityRoute::SecurityAgent
+        );
+        assert_eq!(
+            route("El controlador de dominio no responde").route,
+            CapabilityRoute::SecurityAgent
         );
     }
 

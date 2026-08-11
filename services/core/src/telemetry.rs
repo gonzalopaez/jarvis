@@ -118,6 +118,7 @@ impl TelemetryAdapter for UnavailableTelemetryAdapter {
 }
 
 #[cfg(feature = "network-server")]
+#[derive(Clone)]
 pub struct PrometheusTelemetryAdapter {
     client: reqwest::Client,
     query_url: reqwest::Url,
@@ -166,6 +167,52 @@ impl PrometheusTelemetryAdapter {
             .await
             .map_err(|_| TelemetryAdapterError::Rejected)?;
         body.scalar()
+    }
+
+    async fn down_targets(&self) -> Result<Vec<(String, String)>, TelemetryAdapterError> {
+        let response = self
+            .client
+            .get(self.query_url.clone())
+            .query(&[(
+                "query",
+                "up == 0 or jarvis_proxmox_guest_up == 0 or jarvis_proxmox_service_up == 0",
+            )])
+            .send()
+            .await
+            .map_err(map_request_error)?;
+        if !response.status().is_success() {
+            return Err(TelemetryAdapterError::Rejected);
+        }
+        let body: PrometheusResponse = response
+            .json()
+            .await
+            .map_err(|_| TelemetryAdapterError::Rejected)?;
+        if body.status != "success" {
+            return Err(TelemetryAdapterError::Unavailable);
+        }
+        Ok(body
+            .data
+            .result
+            .into_iter()
+            .filter_map(|sample| {
+                let value = sample.value.1.parse::<f64>().ok()?;
+                if value != 0.0 {
+                    return None;
+                }
+                let component = sample
+                    .metric
+                    .get("name")
+                    .or_else(|| sample.metric.get("component"))
+                    .cloned()
+                    .unwrap_or_else(|| "servicio desconocido".into());
+                let instance = sample
+                    .metric
+                    .get("instance")
+                    .cloned()
+                    .unwrap_or_else(|| "instancia desconocida".into());
+                Some((component, instance))
+            })
+            .collect())
     }
 
     fn selector(&self) -> String {
@@ -292,6 +339,8 @@ struct PrometheusData {
 #[cfg(feature = "network-server")]
 #[derive(Deserialize)]
 struct PrometheusSample {
+    #[serde(default)]
+    metric: std::collections::HashMap<String, String>,
     value: (f64, String),
 }
 
@@ -311,6 +360,55 @@ impl PrometheusResponse {
         }
         Ok(value)
     }
+}
+
+#[cfg(feature = "network-server")]
+pub async fn run_prometheus_availability_until(
+    adapter: Arc<PrometheusTelemetryAdapter>,
+    events: EventBus,
+    shutdown: impl Future<Output = ()>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(10));
+    tokio::pin!(shutdown);
+    // Targets already reported DOWN, so we only publish on the up->down edge
+    // instead of re-emitting an identical alert on every 10s scrape (which would
+    // flood the bounded event history and every WebSocket client).
+    let mut down_targets: std::collections::HashSet<String> = std::collections::HashSet::new();
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                if let Ok(targets) = adapter.down_targets().await {
+                    let mut current = std::collections::HashSet::with_capacity(targets.len());
+                    for (component, instance) in targets {
+                        let key = format!("{}-{}", component, instance);
+                        if !down_targets.contains(&key) {
+                            events.publish(EventType::SecurityAlert, None, json!({
+                                "id": format!("prometheus-up-{key}"),
+                                "host": component,
+                                "timestamp_ms": chrono_like_now_ms(),
+                                "severity": "high",
+                                "title": "Servicio caído según Prometheus",
+                                "description": format!("Prometheus reporta DOWN: {}", component),
+                            }));
+                        }
+                        current.insert(key);
+                    }
+                    // Targets absent from this successful scrape have recovered;
+                    // forgetting them lets a future outage alert again.
+                    down_targets = current;
+                }
+            }
+            () = &mut shutdown => break,
+        }
+    }
+}
+
+#[cfg(feature = "network-server")]
+fn chrono_like_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 #[cfg(feature = "network-server")]

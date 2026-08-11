@@ -39,7 +39,7 @@ Web UI requirements: Node.js/npm.
     npm run build
     npm run dev
 
-The generated `dist/` is a static Web UI. It reads aggregate same-origin Core health without Tauri. Authenticated browser commands and server telemetry remain disabled until trusted session issuance and the realtime gateway are implemented.
+The generated `dist/` is a static Web UI. It reads aggregate same-origin Core health without Tauri. After exchanging an existing operator access key for a bounded HttpOnly session, it can use authenticated commands, realtime telemetry, security alerts and voice without exposing service credentials to JavaScript.
 
 For local browser development, an optional `JARVIS_CORE_URL` configures Vite to proxy only `/v1/health`. It is not included in the browser bundle. Protected routes are deliberately not proxied by the development server.
 

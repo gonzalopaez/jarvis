@@ -1,8 +1,9 @@
 use jarvis_core::{
-    bind_private, serve_until, ActionRequest, AuditEvent, AuditSink, BearerAuthenticator,
-    CodexHttpClient, ConversationService, CoreGateway, CredentialRecord, EventBus, ExecutionResult,
-    PolicyEngine, Principal, PrometheusTelemetryAdapter, RestrictedExecutor, TelemetryService,
-    Transport, TransportConfig, VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller, DEFAULT_TELEMETRY_INTERVAL,
+    bind_private, run_prometheus_availability_until, serve_until, ActionRequest, AuditEvent,
+    AuditSink, BearerAuthenticator, CodexHttpClient, ConversationService, CoreGateway,
+    CredentialRecord, EventBus, ExecutionResult, PolicyEngine, Principal,
+    PrometheusTelemetryAdapter, RestrictedExecutor, TelemetryService, Transport, TransportConfig,
+    VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller, DEFAULT_TELEMETRY_INTERVAL,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -99,6 +100,7 @@ async fn run() -> Result<(), &'static str> {
         .map_err(|_| "JARVIS_TELEMETRY_INSTANCE is required")?;
     let prometheus = PrometheusTelemetryAdapter::new(prometheus_url, telemetry_instance)
         .map_err(|_| "Prometheus telemetry configuration is invalid")?;
+    let prometheus_alerts = Arc::new(prometheus.clone());
     let telemetry = TelemetryService::new(
         vec![Arc::new(prometheus)],
         transport.event_bus(),
@@ -106,11 +108,29 @@ async fn run() -> Result<(), &'static str> {
     )
     .map_err(|_| "telemetry service configuration is invalid")?;
     let telemetry_task = tokio::spawn(telemetry.run_until(std::future::pending()));
-    let wazuh_task = if let (Ok(url), Ok(token)) = (env::var("JARVIS_WAZUH_RELAY_URL"), load_secret("wazuh-relay-token", 32)) {
-        let url = url.parse().map_err(|_| "JARVIS_WAZUH_RELAY_URL is invalid")?;
-        let poller = WazuhSecurityPoller::new(url, token).map_err(|_| "Wazuh relay configuration is invalid")?;
-        Some(tokio::spawn(poller.run_until(transport.event_bus(), std::future::pending())))
-    } else { None };
+    let prometheus_alert_task = tokio::spawn(run_prometheus_availability_until(
+        prometheus_alerts,
+        transport.event_bus(),
+        std::future::pending(),
+    ));
+    let wazuh_task = match env::var("JARVIS_WAZUH_RELAY_URL") {
+        Ok(value) if !value.trim().is_empty() => {
+            let url = value
+                .parse()
+                .map_err(|_| "JARVIS_WAZUH_RELAY_URL is invalid")?;
+            let token = load_secret("wazuh-relay-token", 32)?;
+            let poller = WazuhSecurityPoller::new(url, token)
+                .map_err(|_| "Wazuh relay configuration is invalid")?;
+            eprintln!("jarvis-core Wazuh security poller enabled");
+            Some(tokio::spawn(
+                poller.run_until(transport.event_bus(), std::future::pending()),
+            ))
+        }
+        _ => {
+            eprintln!("jarvis-core Wazuh security poller disabled: JARVIS_WAZUH_RELAY_URL is not configured");
+            None
+        }
+    };
 
     eprintln!("jarvis-core ready on {bind_address}");
     let result = serve_until(listener, transport, shutdown_signal())
@@ -118,7 +138,12 @@ async fn run() -> Result<(), &'static str> {
         .map_err(|_| "network server stopped unexpectedly");
     telemetry_task.abort();
     let _ = telemetry_task.await;
-    if let Some(task) = wazuh_task { task.abort(); let _ = task.await; }
+    prometheus_alert_task.abort();
+    let _ = prometheus_alert_task.await;
+    if let Some(task) = wazuh_task {
+        task.abort();
+        let _ = task.await;
+    }
     result
 }
 
