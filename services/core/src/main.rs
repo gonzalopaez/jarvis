@@ -1,9 +1,10 @@
 use jarvis_core::{
     bind_private, run_prometheus_availability_until, serve_until, ActionRequest, AuditEvent,
     AuditSink, BearerAuthenticator, CodexHttpClient, ConversationService, CoreGateway,
-    CredentialRecord, EventBus, ExecutionResult, PolicyEngine, Principal,
-    PrometheusTelemetryAdapter, RestrictedExecutor, TelemetryService, Transport, TransportConfig,
-    VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller, DEFAULT_TELEMETRY_INTERVAL,
+    CredentialRecord, EventBus, ExecutionResult, KnowledgeClient, KnowledgeConfig, PolicyEngine,
+    Principal, PrometheusTelemetryAdapter, RestrictedExecutor, TelemetryService, Transport,
+    TransportConfig, VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller,
+    DEFAULT_TELEMETRY_INTERVAL,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -14,6 +15,7 @@ const MAX_CREDENTIAL_FILE_BYTES: u64 = 64 * 1024;
 const VOICE_CREDENTIAL_NAME: &str = "voice-service-token";
 const LITELLM_CREDENTIAL_NAME: &str = "litellm-token";
 const CODEX_CREDENTIAL_NAME: &str = "codex-service-token";
+const RAG_EMBEDDINGS_CREDENTIAL_NAME: &str = "rag-embeddings-token";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -79,7 +81,12 @@ async fn run() -> Result<(), &'static str> {
     let events = EventBus::default();
     let codex = load_codex_client()?;
     let codex_configured = codex.is_some();
-    let conversation = ConversationService::new(voice.clone(), codex, events.clone());
+    let knowledge = load_knowledge_client()?;
+    let rag_configured = knowledge.is_some();
+    let mut conversation = ConversationService::new(voice.clone(), codex, events.clone());
+    if let Some(knowledge) = knowledge {
+        conversation = conversation.with_knowledge(knowledge);
+    }
     let transport = Transport::with_config(
         gateway,
         authenticator,
@@ -132,7 +139,7 @@ async fn run() -> Result<(), &'static str> {
         }
     };
 
-    eprintln!("jarvis-core ready on {bind_address}");
+    eprintln!("jarvis-core ready on {bind_address}; rag_enabled={rag_configured}");
     let result = serve_until(listener, transport, shutdown_signal())
         .await
         .map_err(|_| "network server stopped unexpectedly");
@@ -145,6 +152,47 @@ async fn run() -> Result<(), &'static str> {
         let _ = task.await;
     }
     result
+}
+
+fn load_knowledge_client() -> Result<Option<KnowledgeClient>, &'static str> {
+    let qdrant = env::var("JARVIS_QDRANT_URL").ok();
+    let collection = env::var("JARVIS_RAG_COLLECTION").ok();
+    let embedding_model = env::var("JARVIS_RAG_EMBEDDING_MODEL").ok();
+    if qdrant.is_none() && collection.is_none() && embedding_model.is_none() {
+        return Ok(None);
+    }
+    let qdrant_base_url = qdrant
+        .ok_or("JARVIS_QDRANT_URL is required when RAG is configured")?
+        .parse()
+        .map_err(|_| "JARVIS_QDRANT_URL is invalid")?;
+    let collection =
+        collection.ok_or("JARVIS_RAG_COLLECTION is required when RAG is configured")?;
+    let embedding_model =
+        embedding_model.ok_or("JARVIS_RAG_EMBEDDING_MODEL is required when RAG is configured")?;
+    let score_threshold = env::var("JARVIS_RAG_SCORE_THRESHOLD")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<f64>()
+                .map_err(|_| "JARVIS_RAG_SCORE_THRESHOLD is invalid")
+        })
+        .transpose()?
+        .unwrap_or(0.55);
+    let litellm_base_url = env::var("JARVIS_LITELLM_URL")
+        .map_err(|_| "JARVIS_LITELLM_URL is required")?
+        .parse()
+        .map_err(|_| "JARVIS_LITELLM_URL is invalid")?;
+    KnowledgeClient::new(KnowledgeConfig {
+        litellm_base_url,
+        litellm_token: load_secret(RAG_EMBEDDINGS_CREDENTIAL_NAME, 20)?,
+        embedding_model,
+        qdrant_base_url,
+        collection,
+        limit: 4,
+        score_threshold,
+    })
+    .map(Some)
+    .map_err(|_| "RAG configuration is invalid")
 }
 
 fn load_codex_client() -> Result<Option<CodexHttpClient>, &'static str> {

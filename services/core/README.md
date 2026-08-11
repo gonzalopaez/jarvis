@@ -71,6 +71,11 @@ The Desktop HUD is served read-only through Nginx Proxy Manager at
 and the authenticated `/ws` upgrade behind it. See `STATUS.md` at the repo root
 for the live, verified deployment state.
 
+Conversation can optionally retrieve reviewed infrastructure documentation
+from Qdrant before calling LiteLLM. This RAG path is read-only, bounded and
+fails open to ordinary conversation when retrieval is unavailable; it does not
+replace authenticated tools for live state. See `docs/adr/ADR-013-qdrant-infrastructure-rag.md`.
+
 WebSocket startup additionally requires `JARVIS_WEB_ORIGIN` as one exact HTTPS origin without a trailing slash. The gateway fails closed when missing, rejects anonymous or cross-origin upgrades and does not provide a browser authentication bypass.
 
 ## Test

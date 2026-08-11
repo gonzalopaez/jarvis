@@ -36,5 +36,10 @@ n8n uses separate budgeted, rate-limited keys for chat triage
 (`n8n-soc-embeddings`, restricted to `nomic-embed-text`). This preserves least
 privilege while allowing the workflow's RAG pre-filter to operate.
 
+Jarvis Core infrastructure RAG uses another embeddings-only key
+(`jarvis-core-rag`) and the `jarvis-embed-multilingual` alias. Offline indexing uses a
+separate short-budget key (`jarvis-rag-ingest`). Neither key can call chat
+models. See ADR-013.
+
 See `STATUS.md` at the repo root for what is verified against the running
 LiteLLM instance.
