@@ -114,7 +114,7 @@ TOOLS = [
         "description": "Returns normalized status for one explicitly allowed JARVIS container.",
         "inputSchema": {
             "type": "object",
-            "properties": {"vmid": {"type": "integer", "enum": [124, 125]}},
+            "properties": {"vmid": {"type": "integer", "enum": sorted(ALLOWED_VMIDS)}},
             "required": ["vmid"],
             "additionalProperties": False,
         },

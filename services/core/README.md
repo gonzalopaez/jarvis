@@ -35,9 +35,18 @@ The executable fails closed unless `JARVIS_CORE_BIND` contains a validated priva
 
 The included Bearer adapter accepts only opaque credentials of at least 32 bytes and retains SHA-256 digests rather than raw values. It is a transitional private-integration mechanism; see docs/authentication.md.
 
-No provider, model, n8n, OpenBao, shell or infrastructure adapter is connected.
+The Codex expert-agent adapter is connected and reports `READY`; the Prometheus
+telemetry adapter consumes real `jarvis_proxmox_guest_up` / `jarvis_proxmox_service_up`
+metrics (see ADR-011). No n8n, OpenBao, shell or infrastructure *write* adapter is connected.
 
 The deployed executor is intentionally disabled. Health, governed conversation, telemetry and read-only security alert paths can be exercised, but no infrastructure action can execute until a capability-specific executor passes a separate review.
+
+## Deployment
+
+The Desktop HUD is served read-only through Nginx Proxy Manager at
+`https://jarvis.d4rkn0d3.com`; the Core answers `/v1/health`, `/api/v1/health`
+and the authenticated `/ws` upgrade behind it. See `STATUS.md` at the repo root
+for the live, verified deployment state.
 
 WebSocket startup additionally requires `JARVIS_WEB_ORIGIN` as one exact HTTPS origin without a trailing slash. The gateway fails closed when missing, rejects anonymous or cross-origin upgrades and does not provide a browser authentication bypass.
 

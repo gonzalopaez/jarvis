@@ -72,6 +72,25 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  mcp:
+    name: MCP gateway
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/mcp-gateway
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compile gateway
+        run: python3 -m py_compile jarvis_mcp.py
+
+      - name: Test allow-list enforcement
+        run: python3 -m unittest -v
+
   security:
     name: Contracts and secret scan
     runs-on: ubuntu-24.04
