@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh JARVIS Proxmox VM metrics
+
+[Timer]
+OnBootSec=5s
+OnUnitActiveSec=15s
+
+[Install]
+WantedBy=timers.target

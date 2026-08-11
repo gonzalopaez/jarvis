@@ -1,0 +1,7 @@
+[Unit]
+Description=JARVIS Proxmox VM Prometheus metrics
+Before=prometheus-node-exporter.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/jarvis-proxmox-vm-metrics
