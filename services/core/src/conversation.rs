@@ -7,12 +7,12 @@ use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     sync::atomic::{AtomicU64, Ordering},
-    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
+use crate::auth::OneTimeGrantStore;
 use crate::VoicePipeline;
 
 static CONVERSATION_AUDIT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -46,7 +46,7 @@ pub struct ConversationService {
     models: VoicePipeline,
     codex: Option<CodexHttpClient>,
     events: EventBus,
-    pending_mitigation: Arc<Mutex<HashMap<String, Instant>>>,
+    pending_mitigation: OneTimeGrantStore<String>,
 }
 
 impl ConversationService {
@@ -56,7 +56,7 @@ impl ConversationService {
             models,
             codex,
             events,
-            pending_mitigation: Arc::new(Mutex::new(HashMap::new())),
+            pending_mitigation: OneTimeGrantStore::new(MAX_PENDING_MITIGATIONS),
         }
     }
 
@@ -268,22 +268,9 @@ impl ConversationService {
             answer.push_str(&format!("{}: {} en {}.", severity, title, host));
         }
         if !availability_only {
-            if let Ok(mut pending) = self.pending_mitigation.lock() {
-                let now = Instant::now();
-                pending.retain(|_, created| now.duration_since(*created) <= PENDING_MITIGATION_TTL);
-                if pending.len() >= MAX_PENDING_MITIGATIONS
-                    && !pending.contains_key(&request.session_id)
-                {
-                    if let Some(oldest) = pending
-                        .iter()
-                        .min_by_key(|(_, created)| **created)
-                        .map(|(session, _)| session.clone())
-                    {
-                        pending.remove(&oldest);
-                    }
-                }
-                pending.insert(request.session_id.clone(), now);
-            }
+            let _ = self
+                .pending_mitigation
+                .issue_at(request.session_id.clone(), Instant::now());
             answer
                 .push_str(" ¿Querés que evaluemos cómo mitigar el riesgo aumentando la seguridad?");
         }
@@ -291,14 +278,11 @@ impl ConversationService {
     }
 
     fn take_pending_mitigation(&self, session_id: &str) -> bool {
-        self.pending_mitigation
-            .lock()
-            .map(|mut pending| {
-                let now = Instant::now();
-                pending.retain(|_, created| now.duration_since(*created) <= PENDING_MITIGATION_TTL);
-                pending.remove(session_id).is_some()
-            })
-            .unwrap_or(false)
+        self.pending_mitigation.take_at(
+            &session_id.to_string(),
+            PENDING_MITIGATION_TTL,
+            Instant::now(),
+        )
     }
 
     async fn model_response(
@@ -645,14 +629,10 @@ mod tests {
     #[test]
     fn expired_mitigation_confirmation_is_rejected() {
         let service = service(EventBus::default());
-        service
-            .pending_mitigation
-            .lock()
-            .expect("pending mitigations")
-            .insert(
-                "session-a".into(),
-                Instant::now() - PENDING_MITIGATION_TTL - Duration::from_secs(1),
-            );
+        service.pending_mitigation.issue_at(
+            "session-a".into(),
+            Instant::now() - PENDING_MITIGATION_TTL - Duration::from_secs(1),
+        );
 
         assert!(!service.take_pending_mitigation("session-a"));
     }

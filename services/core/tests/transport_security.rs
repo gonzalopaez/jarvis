@@ -605,7 +605,7 @@ async fn authorization_pending_action_never_reaches_executor() {
     let calls = Arc::clone(&executor.calls);
     let response = transport(executor)
         .handle(request(
-            action("demo.protected_action", "demo"),
+            action("security.host.isolate", "host-01"),
             Some("Test operator"),
         ))
         .await;

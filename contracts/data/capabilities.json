@@ -1,0 +1,110 @@
+[
+  {
+    "capability": "wazuh.alerts.read",
+    "tier": 1,
+    "owner_agent": "wazuh-agent",
+    "required_evidence": [],
+    "authorization": {
+      "type": "none"
+    }
+  },
+  {
+    "capability": "proxmox.guest.status",
+    "tier": 1,
+    "owner_agent": "proxmox-agent",
+    "required_evidence": [],
+    "authorization": {
+      "type": "none"
+    }
+  },
+  {
+    "capability": "core.health.read",
+    "tier": 1,
+    "owner_agent": "jarvis-central",
+    "required_evidence": [],
+    "authorization": {
+      "type": "none"
+    }
+  },
+  {
+    "capability": "security.user.disable",
+    "tier": 2,
+    "owner_agent": "wazuh-agent",
+    "required_evidence": [
+      "wazuh.alert",
+      "wazuh.agent.telemetry"
+    ],
+    "authorization": {
+      "type": "single_grant",
+      "expiry_seconds": 300
+    }
+  },
+  {
+    "capability": "security.ip.block",
+    "tier": 2,
+    "owner_agent": "wazuh-agent",
+    "required_evidence": [
+      "wazuh.alert",
+      "wazuh.network.context"
+    ],
+    "authorization": {
+      "type": "single_grant",
+      "expiry_seconds": 300
+    }
+  },
+  {
+    "capability": "security.host.isolate",
+    "tier": 2,
+    "owner_agent": "wazuh-agent",
+    "required_evidence": [
+      "wazuh.alert",
+      "wazuh.agent.telemetry"
+    ],
+    "authorization": {
+      "type": "single_grant",
+      "expiry_seconds": 300
+    }
+  },
+  {
+    "capability": "proxmox.vm.deploy",
+    "tier": 3,
+    "owner_agent": "proxmox-agent",
+    "required_evidence": [
+      "proxmox.cluster.capacity",
+      "proxmox.storage.status"
+    ],
+    "authorization": {
+      "type": "typed_confirmation",
+      "expiry_seconds": 120,
+      "required_field": "rollback_plan"
+    }
+  },
+  {
+    "capability": "proxmox.vm.destroy",
+    "tier": 3,
+    "owner_agent": "proxmox-agent",
+    "required_evidence": [
+      "proxmox.guest.status",
+      "proxmox.guest.dependencies"
+    ],
+    "authorization": {
+      "type": "typed_confirmation",
+      "expiry_seconds": 120,
+      "required_field": "rollback_plan"
+    }
+  },
+  {
+    "capability": "proxmox.ct.destroy",
+    "tier": 3,
+    "owner_agent": "proxmox-agent",
+    "required_evidence": [
+      "proxmox.guest.status",
+      "proxmox.guest.dependencies"
+    ],
+    "authorization": {
+      "type": "typed_confirmation",
+      "expiry_seconds": 120,
+      "required_field": "rollback_plan"
+    }
+  }
+]
