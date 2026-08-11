@@ -1,0 +1,29 @@
+[Unit]
+Description=JARVIS Wazuh domain agent
+After=network-online.target wazuh-manager.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/jarvis-wazuh-agent/environment
+LoadCredential=litellm-token:/etc/jarvis-wazuh-agent/litellm-token
+LoadCredential=core-token:/etc/jarvis-wazuh-agent/core-token
+Environment=JARVIS_LITELLM_TOKEN_FILE=%d/litellm-token
+Environment=JARVIS_CORE_TOKEN_FILE=%d/core-token
+Environment=JARVIS_WAZUH_AGENT_TOKEN_FILE=/etc/jarvis-wazuh-agent/relay-token
+Environment=JARVIS_SECURITY_VERDICT_SCHEMA=/usr/local/share/jarvis/contracts/security-verdict.v1.schema.json
+ExecStart=/usr/bin/python3 /usr/local/lib/jarvis-wazuh-agent/wazuh_agent.py
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/var/ossec/logs/alerts/alerts.json
+ReadWritePaths=/run
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

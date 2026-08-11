@@ -1,0 +1,58 @@
+{
+  "name": "SOC 2.0",
+  "active": false,
+  "nodes": [
+    {
+      "id": "wazuh-alert-entry",
+      "name": "Wazuh Alert Entry",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wazuh-alerts",
+        "options": { "rawBody": true }
+      }
+    },
+    {
+      "id": "normalize-alert-data",
+      "name": "Normalize Alert Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "jsCode": "let alert = {}; try { const raw = $input.item.binary?.data; if (raw) { const decoded = Buffer.from(raw.data, 'base64').toString('utf8'); const parsed = JSON.parse(decoded); alert = parsed.body ?? parsed; } else { alert = $input.item.json?.body ?? $input.item.json; } } catch (_) { alert = $input.item.json?.body ?? $input.item.json ?? {}; } const level = Number.parseInt(alert.rule?.level ?? 0, 10); const fullLog = String(alert.full_log ?? ''); const userMatch = fullLog.match(/user[=:\\s]+([\\w\\-.@]+)/i); return { alert_id: String(alert.id ?? alert.rule?.id ?? ''), rule_id: String(alert.rule?.id ?? ''), title: String(alert.rule?.description ?? 'Wazuh alert').slice(0, 160), level, severity: level >= 12 ? 'critical' : level >= 10 ? 'high' : level >= 7 ? 'medium' : 'low', host: String(alert.agent?.name ?? alert.hostname ?? 'unknown').slice(0, 128), user: String(alert.data?.dstuser ?? alert.data?.srcuser ?? userMatch?.[1] ?? '').slice(0, 128), timestamp: String(alert.timestamp ?? new Date().toISOString()), full_log: fullLog.slice(0, 2000) };"
+      }
+    },
+    {
+      "id": "correlate-five-minute-window",
+      "name": "Correlate 5m by Host and User",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0],
+      "parameters": {
+        "jsCode": "const WINDOW_MS = 5 * 60 * 1000; const MAX_CASES = 500; const now = Date.now(); const state = $getWorkflowStaticData('global'); state.cases ??= {}; for (const [key, value] of Object.entries(state.cases)) { if (now - value.last_seen_ms > WINDOW_MS) delete state.cases[key]; } const key = `${$json.host}|${$json.user || '-'}`; const current = state.cases[key] ?? { first_seen_ms: now, count: 0, alert_ids: [] }; current.last_seen_ms = now; current.count += 1; current.alert_ids = [...new Set([...current.alert_ids, $json.alert_id])].slice(-20); state.cases[key] = current; const keys = Object.keys(state.cases); if (keys.length > MAX_CASES) { keys.sort((a, b) => state.cases[a].last_seen_ms - state.cases[b].last_seen_ms).slice(0, keys.length - MAX_CASES).forEach(k => delete state.cases[k]); } return { ...$json, correlation_key: key, window_seconds: 300, correlated_count: current.count, first_seen_ms: current.first_seen_ms, last_seen_ms: current.last_seen_ms, alert_ids: current.alert_ids };"
+      }
+    },
+    {
+      "id": "telegram-correlated-notification",
+      "name": "Telegram Correlated Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [720, 0],
+      "parameters": {
+        "chatId": "={{ $env.JARVIS_SOC_TELEGRAM_CHAT_ID }}",
+        "text": "=🔔 SOC correlación mecánica\nHost: {{ $json.host }}\nUsuario: {{ $json.user || 'N/A' }}\nSeveridad: {{ $json.severity }}\nAlertas en 5m: {{ $json.correlated_count }}\nRegla: {{ $json.title }}",
+        "additionalFields": {}
+      }
+    }
+  ],
+  "connections": {
+    "Wazuh Alert Entry": { "main": [[{ "node": "Normalize Alert Data", "type": "main", "index": 0 }]] },
+    "Normalize Alert Data": { "main": [[{ "node": "Correlate 5m by Host and User", "type": "main", "index": 0 }]] },
+    "Correlate 5m by Host and User": { "main": [[{ "node": "Telegram Correlated Alert", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "tags": []
+}

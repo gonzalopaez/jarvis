@@ -19,7 +19,7 @@ tmp="/tmp/jarvis-proxmox-vm-status.$$"
 GUESTS="101|adguard|ct 102|opnsense|vm 105|cloudflare-tunnel|ct 106|dc|vm 108|freeipa|vm 109|tailscale-vpn|ct 112|n8n|ct 115|qdrant|ct 116|original-ollama|ct 120|wazuh|ct 123|openbao|ct 124|jarvis-core|ct 125|jarvis-voice|ct 126|jarvis-mcp|ct 127|prometheus|ct"
 
 # critical services: "vmid|name|service". A guest may run more than one service.
-SERVICES="101|adguard|AdGuardHome 105|cloudflare-tunnel|cloudflared 109|tailscale-vpn|tailscaled 124|jarvis-core|jarvis-core 124|jarvis-core|jarvis-codex 125|jarvis-voice|jarvis-voice 126|jarvis-mcp|jarvis-mcp 127|prometheus|prometheus 120|wazuh|jarvis-wazuh-relay"
+SERVICES="101|adguard|AdGuardHome 105|cloudflare-tunnel|cloudflared 109|tailscale-vpn|tailscaled 124|jarvis-core|jarvis-core 124|jarvis-core|jarvis-codex 125|jarvis-voice|jarvis-voice 126|jarvis-mcp|jarvis-mcp 127|prometheus|prometheus 120|wazuh|jarvis-wazuh-agent"
 
 {
   echo "# HELP jarvis_proxmox_guest_up Whether a critical Proxmox guest is running."
