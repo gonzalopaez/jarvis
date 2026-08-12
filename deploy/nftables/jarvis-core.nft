@@ -19,8 +19,8 @@ table inet filter {
         # Application ingress is accepted only from the internal Nginx proxy.
         ip saddr 192.168.1.4 tcp dport 4100 ct state new accept
 
-        # Wazuh Agent submits proposals; Core policy remains the authorization boundary.
-        ip saddr 192.168.1.10 tcp dport 4100 ct state new accept
+        # Domain agents submit proposals; Core remains the authorization boundary.
+        ip saddr { 192.168.1.10, 192.168.1.23 } tcp dport 4100 ct state new accept
 
         # Operational metrics are accepted only from the Prometheus collector.
         ip saddr 192.168.1.24 tcp dport 9100 ct state new accept
