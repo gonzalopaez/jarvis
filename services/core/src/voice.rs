@@ -8,7 +8,7 @@ const MAX_RESPONSE_BYTES: usize = 16 * 1024;
 const MAX_AUDIO_BYTES: usize = 8 * 1024 * 1024;
 const MAX_LLM_CONTEXT_BYTES: usize = 12 * 1024;
 const MAX_UPSTREAM_RESPONSE_BYTES: usize = 128 * 1024;
-const LLM_DEADLINE: Duration = Duration::from_secs(8);
+const LLM_DEADLINE: Duration = Duration::from_secs(20);
 const VOICE_SERVICE_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
@@ -464,8 +464,8 @@ mod speech_tests {
     }
 
     #[test]
-    fn every_llm_call_has_an_eight_second_deadline() {
-        assert_eq!(LLM_DEADLINE, Duration::from_secs(8));
+    fn every_llm_call_has_a_twenty_second_deadline() {
+        assert_eq!(LLM_DEADLINE, Duration::from_secs(20));
     }
 
     #[test]

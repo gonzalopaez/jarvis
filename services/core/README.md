@@ -41,6 +41,19 @@ metrics (see ADR-011). No n8n, OpenBao, shell or infrastructure *write* adapter 
 
 The deployed executor is intentionally disabled. Health, governed conversation, telemetry and read-only security alert paths can be exercised, but no infrastructure action can execute until a capability-specific executor passes a separate review.
 
+## LiteLLM request budget
+
+Core has one direct LiteLLM adapter, `VoicePipeline`, which is used by the
+conversation routes in `conversation.rs` and by the voice pipeline. Every chat
+completion goes through `request_completion`, whose dedicated HTTP client has a
+20-second total deadline. The serialized `messages` array is rejected above
+12 KiB before the request is sent, and upstream responses are capped at 128 KiB.
+Tool calls use the same deadline and response cap but do not carry model context.
+
+`CodexHttpClient` in `conversation.rs` talks only to the separately bounded
+Codex service; it is not a direct LiteLLM client. Its task timeout and 128 KiB
+response cap are enforced independently.
+
 ## Deployment
 
 The Desktop HUD is served read-only through Nginx Proxy Manager at
