@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     collections::HashSet,
+    future::Future,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
@@ -19,6 +20,14 @@ static CONVERSATION_AUDIT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const MAX_CODEX_RESPONSE_BYTES: usize = 128 * 1024;
 const MAX_PENDING_MITIGATIONS: usize = 128;
 const PENDING_MITIGATION_TTL: Duration = Duration::from_secs(5 * 60);
+
+async fn fan_out_evidence<A, B>(infrastructure: A, security: B) -> (A::Output, B::Output)
+where
+    A: Future,
+    B: Future,
+{
+    tokio::join!(infrastructure, security)
+}
 
 fn is_affirmative(message: &str) -> bool {
     matches!(
@@ -124,6 +133,7 @@ impl ConversationService {
                     )),
                 }
             }
+            CapabilityRoute::CrossDomainAgents => self.cross_domain_response(request).await,
             CapabilityRoute::SecurityAgent => self.security_response(request),
             CapabilityRoute::Automation => Err((
                 "AUTOMATION_UNAVAILABLE",
@@ -156,6 +166,26 @@ impl ConversationService {
                     }),
                 )
             }
+        }
+    }
+
+    async fn cross_domain_response(
+        &self,
+        request: &CoreRequest,
+    ) -> Result<(String, &'static str), (&'static str, &'static str)> {
+        let infrastructure = self.codex_response(request, "infrastructure_diagnostic");
+        let security = async { self.security_response(request) };
+        let (infrastructure, security) = fan_out_evidence(infrastructure, security).await;
+
+        match (infrastructure, security) {
+            (Ok((infrastructure, _)), Ok((security, _))) => Ok((
+                format!(
+                    "Evidencia de infraestructura: {infrastructure}\nEvidencia de seguridad: {security}"
+                ),
+                "multi_agent",
+            )),
+            (Err(error), _) => Err(error),
+            (_, Err(error)) => Err(error),
         }
     }
 
@@ -417,7 +447,7 @@ fn response(
         status,
         audit_id: format!(
             "conversation-{:016x}",
-            CONVERSATION_AUDIT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            CONVERSATION_AUDIT_SEQUENCE.fetch_add(1, Ordering::SeqCst)
         ),
         data,
         error,
@@ -551,6 +581,8 @@ pub enum CodexClientError {
 mod tests {
     use super::*;
     use crate::VoicePipelineConfig;
+    use std::sync::Arc;
+    use tokio::sync::Barrier;
 
     fn service(events: EventBus) -> ConversationService {
         let voice = VoicePipeline::new(VoicePipelineConfig {
@@ -636,5 +668,63 @@ mod tests {
         );
 
         assert!(!service.take_pending_mitigation("session-a"));
+    }
+
+    #[tokio::test]
+    async fn cross_domain_evidence_is_requested_concurrently() {
+        let started = Arc::new(Barrier::new(3));
+        let first = {
+            let started = Arc::clone(&started);
+            async move {
+                started.wait().await;
+                "infrastructure"
+            }
+        };
+        let second = {
+            let started = Arc::clone(&started);
+            async move {
+                started.wait().await;
+                "security"
+            }
+        };
+
+        let joined = fan_out_evidence(first, second);
+        let release = async {
+            started.wait().await;
+        };
+        let ((infrastructure, security), ()) = tokio::join!(joined, release);
+
+        assert_eq!(infrastructure, "infrastructure");
+        assert_eq!(security, "security");
+    }
+
+    #[test]
+    fn audit_ids_remain_unique_during_concurrent_fan_out() {
+        let request = request("session-a", "Correlacioná infraestructura y seguridad");
+        let responses = std::thread::scope(|scope| {
+            let handles = (0..32)
+                .map(|_| {
+                    scope.spawn(|| {
+                        response(
+                            &request,
+                            ResponseStatus::Completed,
+                            Some(json!({ "message": "bounded evidence" })),
+                            None,
+                        )
+                        .audit_id
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("audit response"))
+                .collect::<Vec<_>>()
+        });
+        let unique = responses.iter().collect::<HashSet<_>>();
+
+        assert_eq!(responses.len(), unique.len());
+        assert!(responses
+            .iter()
+            .all(|audit_id| audit_id.starts_with("conversation-") && audit_id.len() == 29));
     }
 }
