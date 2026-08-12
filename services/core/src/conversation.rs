@@ -58,6 +58,12 @@ pub struct ConversationService {
     pending_mitigation: OneTimeGrantStore<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ConversationTimings {
+    pub routing_ms: u64,
+    pub llm_ms: u64,
+}
+
 impl ConversationService {
     pub fn new(models: VoicePipeline, codex: Option<CodexHttpClient>, events: EventBus) -> Self {
         Self {
@@ -70,7 +76,15 @@ impl ConversationService {
     }
 
     pub async fn handle(&self, request: &CoreRequest) -> CoreResponse {
+        self.handle_with_timings(request).await.0
+    }
+
+    pub(crate) async fn handle_with_timings(
+        &self,
+        request: &CoreRequest,
+    ) -> (CoreResponse, ConversationTimings) {
         let message = request.message.as_deref().unwrap_or_default();
+        let routing_started = Instant::now();
         let mut decision = self.router.decide(&CapabilityRequest {
             message: message.into(),
             session_id: request.session_id.clone(),
@@ -80,6 +94,7 @@ impl ConversationService {
         if is_affirmative(message) && self.take_pending_mitigation(&request.session_id) {
             decision = security_remediation_decision();
         }
+        let routing_ms = elapsed_ms(routing_started);
         let correlation = Some(request.request_id.clone());
         self.events.publish(EventType::RouterDecision, correlation.clone(), json!({
             "route": decision.route, "intent": decision.intent, "complexity": decision.complexity,
@@ -93,6 +108,7 @@ impl ConversationService {
             json!({ "previous": "THINKING", "current": "ROUTING", "state": "ROUTING" }),
         );
 
+        let llm_started = Instant::now();
         let result = match decision.route {
             CapabilityRoute::FastModel => {
                 self.model_response(
@@ -143,7 +159,8 @@ impl ConversationService {
                 Err(("MCP_TOOL_UNAVAILABLE", "Direct MCP routing is not enabled"))
             }
         };
-        match result {
+        let llm_ms = elapsed_ms(llm_started);
+        let response = match result {
             Ok((message, mode)) => response(
                 request,
                 ResponseStatus::Completed,
@@ -166,7 +183,8 @@ impl ConversationService {
                     }),
                 )
             }
-        }
+        };
+        (response, ConversationTimings { routing_ms, llm_ms })
     }
 
     async fn cross_domain_response(
@@ -424,6 +442,10 @@ impl ConversationService {
             }
         }
     }
+}
+
+fn elapsed_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
 }
 
 fn codex_agent(
