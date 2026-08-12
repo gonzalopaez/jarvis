@@ -6,10 +6,15 @@ use std::time::Duration;
 const MAX_TRANSCRIPT_BYTES: usize = 8 * 1024;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024;
 const MAX_AUDIO_BYTES: usize = 8 * 1024 * 1024;
+const MAX_LLM_CONTEXT_BYTES: usize = 12 * 1024;
+const MAX_UPSTREAM_RESPONSE_BYTES: usize = 128 * 1024;
+const LLM_DEADLINE: Duration = Duration::from_secs(8);
+const VOICE_SERVICE_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct VoicePipeline {
-    client: Client,
+    voice_client: Client,
+    reasoning_client: Client,
     config: VoicePipelineConfig,
 }
 
@@ -89,13 +94,23 @@ impl VoicePipeline {
         {
             return Err(VoicePipelineError::InvalidConfiguration);
         }
-        let client = Client::builder()
+        let voice_client = Client::builder()
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(180))
+            .timeout(VOICE_SERVICE_DEADLINE)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| VoicePipelineError::InvalidConfiguration)?;
-        Ok(Self { client, config })
+        let reasoning_client = Client::builder()
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(LLM_DEADLINE)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| VoicePipelineError::InvalidConfiguration)?;
+        Ok(Self {
+            voice_client,
+            reasoning_client,
+            config,
+        })
     }
 
     pub async fn process(
@@ -162,7 +177,7 @@ impl VoicePipeline {
             .join("v1/transcribe")
             .map_err(|_| VoicePipelineError::InvalidConfiguration)?;
         let response = self
-            .client
+            .voice_client
             .post(url)
             .bearer_auth(&self.config.voice_token)
             .header(header::CONTENT_TYPE, mime_type)
@@ -274,8 +289,9 @@ impl VoicePipeline {
         url: &Url,
         request: &Value,
     ) -> Result<CompletionResponseMessage, VoicePipelineError> {
+        validate_llm_context(request)?;
         let response = self
-            .client
+            .reasoning_client
             .post(url.clone())
             .bearer_auth(&self.config.litellm_token)
             .json(request)
@@ -289,7 +305,7 @@ impl VoicePipeline {
             .bytes()
             .await
             .map_err(|_| VoicePipelineError::InvalidResponse)?;
-        if bytes.len() > 128 * 1024 {
+        if bytes.len() > MAX_UPSTREAM_RESPONSE_BYTES {
             return Err(VoicePipelineError::InvalidResponse);
         }
         let body: CompletionResponse =
@@ -330,7 +346,7 @@ impl VoicePipeline {
             .map_err(|_| VoicePipelineError::InvalidConfiguration)?;
         let request = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":upstream_name,"arguments":arguments}});
         let response = self
-            .client
+            .reasoning_client
             .post(url)
             .bearer_auth(&self.config.litellm_token)
             .header(header::ACCEPT, "application/json, text/event-stream")
@@ -346,7 +362,7 @@ impl VoicePipeline {
             .bytes()
             .await
             .map_err(|_| VoicePipelineError::InvalidResponse)?;
-        if bytes.len() > 128 * 1024 {
+        if bytes.len() > MAX_UPSTREAM_RESPONSE_BYTES {
             return Err(VoicePipelineError::InvalidResponse);
         }
         let text = std::str::from_utf8(&bytes).map_err(|_| VoicePipelineError::InvalidResponse)?;
@@ -379,7 +395,7 @@ impl VoicePipeline {
             .join("v1/synthesize")
             .map_err(|_| VoicePipelineError::InvalidConfiguration)?;
         let response = self
-            .client
+            .voice_client
             .post(url)
             .bearer_auth(&self.config.voice_token)
             .json(&SynthesisRequest { text: &speech_text })
@@ -398,6 +414,19 @@ impl VoicePipeline {
         }
         Ok(bytes.to_vec())
     }
+}
+
+fn validate_llm_context(request: &Value) -> Result<(), VoicePipelineError> {
+    let messages = request
+        .get("messages")
+        .ok_or(VoicePipelineError::InvalidResponse)?;
+    let size = serde_json::to_vec(messages)
+        .map_err(|_| VoicePipelineError::InvalidResponse)?
+        .len();
+    if size > MAX_LLM_CONTEXT_BYTES {
+        return Err(VoicePipelineError::InvalidResponse);
+    }
+    Ok(())
 }
 
 /// TTS should receive natural language, not Markdown control characters.
@@ -420,7 +449,11 @@ fn valid_completion_text(content: Option<String>) -> Result<String, VoicePipelin
 
 #[cfg(test)]
 mod speech_tests {
-    use super::strip_markdown_for_speech;
+    use super::{
+        strip_markdown_for_speech, validate_llm_context, LLM_DEADLINE, MAX_LLM_CONTEXT_BYTES,
+    };
+    use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn removes_markdown_markers_for_tts_only() {
@@ -428,5 +461,28 @@ mod speech_tests {
             strip_markdown_for_speech("**CPU** *normal* `read-only`"),
             "CPU normal read-only"
         );
+    }
+
+    #[test]
+    fn every_llm_call_has_an_eight_second_deadline() {
+        assert_eq!(LLM_DEADLINE, Duration::from_secs(8));
+    }
+
+    #[test]
+    fn llm_context_over_twelve_kib_is_rejected() {
+        let request = json!({
+            "messages": [{"role": "user", "content": "x".repeat(MAX_LLM_CONTEXT_BYTES)}]
+        });
+
+        assert!(validate_llm_context(&request).is_err());
+    }
+
+    #[test]
+    fn bounded_llm_context_is_accepted() {
+        let request = json!({
+            "messages": [{"role": "user", "content": "bounded context"}]
+        });
+
+        assert!(validate_llm_context(&request).is_ok());
     }
 }

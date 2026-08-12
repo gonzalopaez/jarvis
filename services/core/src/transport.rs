@@ -49,14 +49,14 @@ const MAX_VOICE_CHUNK_BYTES: usize = 64 * 1024;
 #[cfg(feature = "network-server")]
 const MAX_VOICE_SESSION_BYTES: usize = 16 * 1024 * 1024;
 #[cfg(feature = "network-server")]
-const MAX_VOICE_PIPELINE_DURATION: Duration = Duration::from_secs(240);
+const MAX_VOICE_PIPELINE_DURATION: Duration = Duration::from_secs(90);
 
 #[cfg(feature = "network-server")]
 pub struct PrivateListener(TcpListener);
 
 pub const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024;
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-pub const DEFAULT_CONVERSATION_TIMEOUT: Duration = Duration::from_secs(180);
+pub const DEFAULT_CONVERSATION_TIMEOUT: Duration = Duration::from_secs(30);
 
 type ResponseBody = Full<Bytes>;
 

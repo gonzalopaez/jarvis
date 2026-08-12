@@ -16,6 +16,7 @@ pub enum CapabilityRoute {
     FastModel,
     ReasoningModel,
     Codex,
+    CrossDomainAgents,
     InfrastructureAgent,
     SecurityAgent,
     Automation,
@@ -106,19 +107,6 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
         let normalized = normalize(&request.message);
         let tokens: Vec<&str> = normalized.split_whitespace().collect();
 
-        // Infrastructure telemetry must never fall through to a generic model:
-        // it requires verified Prometheus/MCP evidence.
-        if contains_any(&normalized, &["prometheus", "telemetria", "server central"]) {
-            return agent(
-                CapabilityRoute::InfrastructureAgent,
-                "infrastructure_diagnostic",
-                Complexity::Medium,
-                "infrastructure",
-                true,
-                "explicit infrastructure telemetry request",
-            );
-        }
-
         let likely_security_alert_query = contains_any(&normalized, &["alerta", "alertas"])
             && contains_any(
                 &normalized,
@@ -170,6 +158,44 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
         let domain_controller_query = normalized.contains("controlador de dominio")
             || normalized.contains("servidor de ce")
             || contains_word(&tokens, "dc");
+        let explicit_infrastructure_query = contains_any(
+            &normalized,
+            &["prometheus", "telemetria", "telemetría", "server central"],
+        );
+        let explicit_security_query = likely_security_alert_query
+            || contains_any(
+                &normalized,
+                &[
+                    "alerta de seguridad",
+                    "alertas de seguridad",
+                    "alertas criticas",
+                    "amenazas de seguridad",
+                    "wazuh",
+                    "incidente de seguridad",
+                ],
+            );
+        if explicit_infrastructure_query && explicit_security_query {
+            return agent(
+                CapabilityRoute::CrossDomainAgents,
+                "cross_domain_diagnostic",
+                Complexity::High,
+                "infrastructure+security",
+                true,
+                "request requires infrastructure and security evidence",
+            );
+        }
+        // Infrastructure telemetry must never fall through to a generic model:
+        // it requires verified Prometheus/MCP evidence.
+        if explicit_infrastructure_query {
+            return agent(
+                CapabilityRoute::InfrastructureAgent,
+                "infrastructure_diagnostic",
+                Complexity::Medium,
+                "infrastructure",
+                true,
+                "explicit infrastructure telemetry request",
+            );
+        }
         if contains_any(
             &normalized,
             &[
@@ -438,6 +464,15 @@ mod tests {
             route("Revisa el estado de Bluetooth").route,
             CapabilityRoute::InfrastructureAgent
         );
+    }
+
+    #[test]
+    fn cross_domain_evidence_uses_parallel_agents_route() {
+        let decision =
+            route("Correlacioná la telemetría de Prometheus con las alertas críticas de Wazuh");
+
+        assert_eq!(decision.route, CapabilityRoute::CrossDomainAgents);
+        assert_eq!(decision.agent, Some("infrastructure+security"));
     }
 
     #[test]
