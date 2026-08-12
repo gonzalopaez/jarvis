@@ -15,6 +15,8 @@ use http_body_util::{BodyExt, Full, Limited};
 #[cfg(feature = "network-server")]
 use serde::Deserialize;
 use serde::Serialize;
+#[cfg(feature = "network-server")]
+use std::time::Instant;
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -50,6 +52,54 @@ const MAX_VOICE_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_VOICE_SESSION_BYTES: usize = 16 * 1024 * 1024;
 #[cfg(feature = "network-server")]
 const MAX_VOICE_PIPELINE_DURATION: Duration = Duration::from_secs(90);
+
+#[cfg(feature = "network-server")]
+#[derive(Debug, Default, Serialize)]
+struct VoiceTimingLog {
+    request_id: String,
+    capture_upload_ms: u64,
+    stt_ms: u64,
+    routing_ms: u64,
+    llm_ms: u64,
+    tts_ms: u64,
+    audio_transfer_ms: u64,
+    total_ms: u64,
+}
+
+#[cfg(feature = "network-server")]
+struct VoiceTimingGuard {
+    log: VoiceTimingLog,
+    total_started: Instant,
+}
+
+#[cfg(feature = "network-server")]
+impl VoiceTimingGuard {
+    fn new(request_id: String, total_started: Instant) -> Self {
+        Self {
+            log: VoiceTimingLog {
+                request_id,
+                capture_upload_ms: elapsed_ms(total_started),
+                ..VoiceTimingLog::default()
+            },
+            total_started,
+        }
+    }
+}
+
+#[cfg(feature = "network-server")]
+impl Drop for VoiceTimingGuard {
+    fn drop(&mut self) {
+        self.log.total_ms = elapsed_ms(self.total_started);
+        if let Ok(payload) = serde_json::to_string(&self.log) {
+            eprintln!("JARVIS_VOICE_TIMING {payload}");
+        }
+    }
+}
+
+#[cfg(feature = "network-server")]
+fn elapsed_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
+}
 
 #[cfg(feature = "network-server")]
 pub struct PrivateListener(TcpListener);
@@ -789,6 +839,7 @@ async fn run_voice_websocket(
 
     let (mut sender, mut receiver) = socket.split();
     let mut session_id: Option<String> = None;
+    let mut session_started: Option<Instant> = None;
     let mut received_bytes = 0usize;
     let mut audio = Vec::new();
     let mut mime_type: Option<String> = None;
@@ -835,6 +886,7 @@ async fn run_voice_websocket(
                         json!({ "state": "LISTENING" }),
                     );
                     session_id = Some(id);
+                    session_started = Some(Instant::now());
                     mime_type = mime.map(str::to_owned);
                     let ready = json!({ "version": "v1", "type": "voice.session.ready", "max_chunk_bytes": MAX_VOICE_CHUNK_BYTES });
                     if sender
@@ -854,6 +906,10 @@ async fn run_voice_websocket(
                         break;
                     }
                     let id = session_id.take().expect("validated active voice session");
+                    let mut timing = VoiceTimingGuard::new(
+                        id.clone(),
+                        session_started.take().unwrap_or_else(Instant::now),
+                    );
                     let Some(pipeline) = voice.as_ref() else {
                         events.publish(EventType::VoiceSessionFailed, Some(id.clone()), json!({ "code": "VOICE_SERVICE_UNAVAILABLE", "received_bytes": received_bytes }));
                         let unavailable = json!({ "version": "v1", "type": "voice.session.unavailable", "code": "VOICE_SERVICE_UNAVAILABLE" });
@@ -881,15 +937,17 @@ async fn run_voice_websocket(
                             &id,
                             mime_type.as_deref().unwrap_or("audio/webm;codecs=opus"),
                             captured_audio,
+                            &mut timing.log,
                         )
                         .await
                     } else {
-                        pipeline
-                            .process(
-                                mime_type.as_deref().unwrap_or("audio/webm;codecs=opus"),
-                                captured_audio,
-                            )
-                            .await
+                        process_unrouted_voice(
+                            pipeline,
+                            mime_type.as_deref().unwrap_or("audio/webm;codecs=opus"),
+                            captured_audio,
+                            &mut timing.log,
+                        )
+                        .await
                     };
                     match result {
                         Ok(result) => {
@@ -915,6 +973,7 @@ async fn run_voice_websocket(
                                 Some(id.clone()),
                                 json!({ "state": "SPEAKING" }),
                             );
+                            let transfer_started = Instant::now();
                             if sender
                                 .send(Message::Text(output.to_string().into()))
                                 .await
@@ -934,6 +993,7 @@ async fn run_voice_websocket(
                             let _ = sender
                                 .send(Message::Text(complete.to_string().into()))
                                 .await;
+                            timing.log.audio_transfer_ms = elapsed_ms(transfer_started);
                         }
                         Err(error) => {
                             let code = match error {
@@ -998,8 +1058,12 @@ async fn process_routed_voice(
     session_id: &str,
     mime_type: &str,
     audio: Vec<u8>,
+    timings: &mut VoiceTimingLog,
 ) -> Result<crate::VoicePipelineResult, VoicePipelineError> {
-    let transcript = pipeline.transcribe_audio(mime_type, audio).await?;
+    let stt_started = Instant::now();
+    let transcript = pipeline.transcribe_audio(mime_type, audio).await;
+    timings.stt_ms = elapsed_ms(stt_started);
+    let transcript = transcript?;
     let request = CoreRequest {
         api_version: API_VERSION.into(),
         request_id: session_id.into(),
@@ -1009,7 +1073,9 @@ async fn process_routed_voice(
         action: None,
         authorization: None,
     };
-    let response = conversation.handle(&request).await;
+    let (response, conversation_timings) = conversation.handle_with_timings(&request).await;
+    timings.routing_ms = conversation_timings.routing_ms;
+    timings.llm_ms = conversation_timings.llm_ms;
     if response.status != ResponseStatus::Completed {
         return Err(VoicePipelineError::ModelUnavailable);
     }
@@ -1022,11 +1088,41 @@ async fn process_routed_voice(
         })
         .filter(|text| !text.trim().is_empty())
         .ok_or(VoicePipelineError::InvalidResponse)?;
-    let output = pipeline.synthesize_text(&response_text).await?;
+    let tts_started = Instant::now();
+    let output = pipeline.synthesize_text(&response_text).await;
+    timings.tts_ms = elapsed_ms(tts_started);
+    let output = output?;
     Ok(crate::VoicePipelineResult {
         transcript,
         response: response_text,
         audio: output,
+    })
+}
+
+#[cfg(feature = "network-server")]
+async fn process_unrouted_voice(
+    pipeline: &VoicePipeline,
+    mime_type: &str,
+    audio: Vec<u8>,
+    timings: &mut VoiceTimingLog,
+) -> Result<crate::VoicePipelineResult, VoicePipelineError> {
+    let stt_started = Instant::now();
+    let transcript = pipeline.transcribe_audio(mime_type, audio).await;
+    timings.stt_ms = elapsed_ms(stt_started);
+    let transcript = transcript?;
+
+    let llm_started = Instant::now();
+    let response = pipeline.complete_text(&transcript, "jarvis-fast").await;
+    timings.llm_ms = elapsed_ms(llm_started);
+    let response = response?;
+
+    let tts_started = Instant::now();
+    let audio = pipeline.synthesize_text(&response).await;
+    timings.tts_ms = elapsed_ms(tts_started);
+    Ok(crate::VoicePipelineResult {
+        transcript,
+        response,
+        audio: audio?,
     })
 }
 
@@ -1262,4 +1358,51 @@ fn json_response<T: Serialize>(status: StatusCode, value: &T) -> Response<Respon
         .header("x-content-type-options", "nosniff")
         .body(Full::new(Bytes::from(body)))
         .expect("static response metadata is valid")
+}
+
+#[cfg(all(test, feature = "network-server"))]
+mod voice_timing_tests {
+    use super::VoiceTimingLog;
+    use serde_json::{json, Value};
+    use std::collections::HashSet;
+
+    #[test]
+    fn voice_timing_log_contains_only_request_id_and_numeric_timings() {
+        let log = VoiceTimingLog {
+            request_id: "voice-request-42".into(),
+            capture_upload_ms: 1,
+            stt_ms: 2,
+            routing_ms: 3,
+            llm_ms: 4,
+            tts_ms: 5,
+            audio_transfer_ms: 6,
+            total_ms: 21,
+        };
+        let value = serde_json::to_value(log).expect("timing log serializes");
+        let object = value.as_object().expect("timing log is an object");
+        let expected = HashSet::from([
+            "request_id",
+            "capture_upload_ms",
+            "stt_ms",
+            "routing_ms",
+            "llm_ms",
+            "tts_ms",
+            "audio_transfer_ms",
+            "total_ms",
+        ]);
+
+        assert_eq!(
+            object.keys().map(String::as_str).collect::<HashSet<_>>(),
+            expected
+        );
+        assert_eq!(object.get("request_id"), Some(&json!("voice-request-42")));
+        assert!(object
+            .iter()
+            .filter(|(key, _)| key.as_str() != "request_id")
+            .all(|(_, value)| matches!(value, Value::Number(number) if number.is_u64())));
+        assert!(!object.keys().any(|key| matches!(
+            key.as_str(),
+            "audio" | "text" | "transcript" | "response" | "message" | "prompt" | "error"
+        )));
+    }
 }
