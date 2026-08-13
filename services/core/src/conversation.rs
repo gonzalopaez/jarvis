@@ -300,7 +300,10 @@ impl ConversationService {
             || availability_text.contains("servicio")
             || availability_text.contains("servidor");
         let target_query = availability_text;
-        let target = if target_query.contains("vpn") || target_query.contains("uve pene") {
+        let requested_host = requested_security_host(&target_query);
+        let target = if let Some(host) = requested_host.as_deref() {
+            Some(host)
+        } else if target_query.contains("vpn") || target_query.contains("uve pene") {
             Some("vpn")
         } else if target_query.contains("cloudflare") || target_query.contains("tunnel") {
             Some("tunnel")
@@ -352,7 +355,7 @@ impl ConversationService {
                     return None;
                 }
                 if let Some(target) = target {
-                    let host = host.to_lowercase();
+                    let host = normalize_availability_query(&host);
                     let matches = match target {
                         "vpn" => {
                             host.contains("vpn")
@@ -360,7 +363,7 @@ impl ConversationService {
                                 || host.contains("tailscale")
                         }
                         "tunnel" => host.contains("tunnel") || host.contains("cloudflare"),
-                        value => host.contains(value),
+                        value => host == value || host.contains(value),
                     };
                     if !matches {
                         return None;
@@ -378,12 +381,26 @@ impl ConversationService {
             "recientes"
         };
         if alerts.is_empty() {
+            if let Some(host) = requested_host {
+                return Ok((
+                    format!(
+                        "No encontré alertas Wazuh para el equipo {host} entre las últimas 20 alertas verificadas."
+                    ),
+                    "security",
+                ));
+            }
             return Ok((
                 format!("No hay alertas Wazuh {window} en la ventana de eventos disponible.",),
                 "security",
             ));
         }
-        let mut answer = format!("Hay {} alertas Wazuh {window}. ", alerts.len());
+        let mut answer = match requested_host {
+            Some(host) => format!(
+                "El equipo {host} tiene {} alertas Wazuh entre las últimas 20 verificadas. ",
+                alerts.len()
+            ),
+            None => format!("Hay {} alertas Wazuh {window}. ", alerts.len()),
+        };
         for (index, (severity, host, title)) in alerts.drain(..).take(5).enumerate() {
             if index > 0 {
                 answer.push(' ');
@@ -590,6 +607,27 @@ fn normalize_availability_query(value: &str) -> String {
             other => other,
         })
         .collect()
+}
+
+fn requested_security_host(normalized: &str) -> Option<String> {
+    for marker in ["equipo ", "host ", "maquina "] {
+        let Some(rest) = normalized.split_once(marker).map(|(_, rest)| rest) else {
+            continue;
+        };
+        let candidate = rest
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '-');
+        if (1..=64).contains(&candidate.len())
+            && candidate
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return Some(candidate.to_string());
+        }
+    }
+    None
 }
 
 fn availability_label(target: &AvailabilityTarget) -> String {
@@ -906,6 +944,61 @@ mod tests {
         assert_eq!(mode, "security");
         assert!(answer.contains("Hay 1 alertas Wazuh de disponibilidad"));
         assert!(answer.contains("vpn-01"));
+    }
+
+    #[test]
+    fn security_answers_filter_alerts_by_dynamic_equipment_name() {
+        let events = EventBus::default();
+        for (id, host, title) in [
+            ("wazuh-romina-1", "Romina", "Intento de acceso fallido"),
+            ("wazuh-otro-1", "Servidor-02", "Cambio de archivo"),
+        ] {
+            events.publish(
+                EventType::SecurityAlert,
+                None,
+                json!({
+                    "id": id,
+                    "host": host,
+                    "severity": "high",
+                    "title": title,
+                    "description": title
+                }),
+            );
+        }
+        let service = service(events);
+
+        let (answer, mode) = service
+            .security_response(&request("session-a", "¿El equipo Romina tiene alertas?"))
+            .expect("security response");
+
+        assert_eq!(mode, "security");
+        assert!(answer.contains("equipo romina tiene 1 alertas Wazuh"));
+        assert!(answer.contains("Intento de acceso fallido en Romina"));
+        assert!(!answer.contains("Servidor-02"));
+    }
+
+    #[test]
+    fn unknown_equipment_does_not_fall_back_to_all_alerts() {
+        let events = EventBus::default();
+        events.publish(
+            EventType::SecurityAlert,
+            None,
+            json!({
+                "id": "wazuh-other",
+                "host": "Servidor-02",
+                "severity": "high",
+                "title": "Cambio de archivo",
+                "description": "Cambio detectado"
+            }),
+        );
+        let service = service(events);
+
+        let (answer, _) = service
+            .security_response(&request("session-a", "¿El equipo Romina tiene alertas?"))
+            .expect("security response");
+
+        assert!(answer.contains("No encontré alertas Wazuh para el equipo romina"));
+        assert!(!answer.contains("Servidor-02"));
     }
 
     #[test]
