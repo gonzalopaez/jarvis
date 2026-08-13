@@ -126,6 +126,26 @@ pub struct PrometheusTelemetryAdapter {
 }
 
 #[cfg(feature = "network-server")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvailabilityTarget {
+    pub name: String,
+    pub service: Option<String>,
+    pub vmid: String,
+    pub up: bool,
+}
+
+#[cfg(feature = "network-server")]
+pub trait AvailabilityProvider: Send + Sync + 'static {
+    fn current_availability(
+        &self,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Vec<AvailabilityTarget>, TelemetryAdapterError>> + Send + '_,
+        >,
+    >;
+}
+
+#[cfg(feature = "network-server")]
 impl PrometheusTelemetryAdapter {
     pub fn new(base_url: reqwest::Url, instance: String) -> Result<Self, TelemetryAdapterError> {
         if base_url.scheme() != "http"
@@ -215,8 +235,81 @@ impl PrometheusTelemetryAdapter {
             .collect())
     }
 
+    async fn availability_targets(&self) -> Result<Vec<AvailabilityTarget>, TelemetryAdapterError> {
+        let response = self
+            .client
+            .get(self.query_url.clone())
+            .query(&[(
+                "query",
+                "jarvis_proxmox_guest_up or jarvis_proxmox_service_up",
+            )])
+            .send()
+            .await
+            .map_err(map_request_error)?;
+        if !response.status().is_success() {
+            return Err(TelemetryAdapterError::Rejected);
+        }
+        let body: PrometheusResponse = response
+            .json()
+            .await
+            .map_err(|_| TelemetryAdapterError::Rejected)?;
+        if body.status != "success" {
+            return Err(TelemetryAdapterError::Unavailable);
+        }
+        body.data
+            .result
+            .into_iter()
+            .map(|sample| {
+                let value = sample
+                    .value
+                    .1
+                    .parse::<f64>()
+                    .map_err(|_| TelemetryAdapterError::Rejected)?;
+                if !value.is_finite() || !(value == 0.0 || value == 1.0) {
+                    return Err(TelemetryAdapterError::Rejected);
+                }
+                let name = sample
+                    .metric
+                    .get("name")
+                    .filter(|value| valid_name(value))
+                    .cloned()
+                    .ok_or(TelemetryAdapterError::Rejected)?;
+                let vmid = sample
+                    .metric
+                    .get("vmid")
+                    .filter(|value| valid_name(value))
+                    .cloned()
+                    .ok_or(TelemetryAdapterError::Rejected)?;
+                let service = sample
+                    .metric
+                    .get("service")
+                    .filter(|value| valid_name(value))
+                    .cloned();
+                Ok(AvailabilityTarget {
+                    name,
+                    service,
+                    vmid,
+                    up: value == 1.0,
+                })
+            })
+            .collect()
+    }
+
     fn selector(&self) -> String {
         format!("instance=\"{}\"", self.instance)
+    }
+}
+
+#[cfg(feature = "network-server")]
+impl AvailabilityProvider for PrometheusTelemetryAdapter {
+    fn current_availability(
+        &self,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Vec<AvailabilityTarget>, TelemetryAdapterError>> + Send + '_,
+        >,
+    > {
+        Box::pin(self.availability_targets())
     }
 }
 

@@ -52,7 +52,10 @@ pub use session::{
     DEFAULT_SESSION_TTL, MAX_SESSIONS, SESSION_COOKIE_NAME,
 };
 #[cfg(feature = "network-server")]
-pub use telemetry::{run_prometheus_availability_until, PrometheusTelemetryAdapter};
+pub use telemetry::{
+    run_prometheus_availability_until, AvailabilityProvider, AvailabilityTarget,
+    PrometheusTelemetryAdapter,
+};
 pub use telemetry::{
     OperationalTelemetry, TelemetryAdapter, TelemetryAdapterError, TelemetryService,
     TelemetryServiceConfigError, TelemetrySource, TelemetryValidationError, TemperatureReading,

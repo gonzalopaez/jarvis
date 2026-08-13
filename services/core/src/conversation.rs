@@ -14,7 +14,8 @@ use std::{
 };
 
 use crate::auth::OneTimeGrantStore;
-use crate::VoicePipeline;
+use crate::{AvailabilityProvider, AvailabilityTarget, VoicePipeline};
+use std::sync::Arc;
 
 static CONVERSATION_AUDIT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const MAX_CODEX_RESPONSE_BYTES: usize = 128 * 1024;
@@ -56,6 +57,7 @@ pub struct ConversationService {
     codex: Option<CodexHttpClient>,
     events: EventBus,
     pending_mitigation: OneTimeGrantStore<String>,
+    availability: Option<Arc<dyn AvailabilityProvider>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -65,13 +67,19 @@ pub(crate) struct ConversationTimings {
 }
 
 impl ConversationService {
-    pub fn new(models: VoicePipeline, codex: Option<CodexHttpClient>, events: EventBus) -> Self {
+    pub fn new(
+        models: VoicePipeline,
+        codex: Option<CodexHttpClient>,
+        events: EventBus,
+        availability: Option<Arc<dyn AvailabilityProvider>>,
+    ) -> Self {
         Self {
             router: DeterministicCapabilityRouter,
             models,
             codex,
             events,
             pending_mitigation: OneTimeGrantStore::new(MAX_PENDING_MITIGATIONS),
+            availability,
         }
     }
 
@@ -141,12 +149,16 @@ impl ConversationService {
                 }
             },
             CapabilityRoute::InfrastructureAgent => {
-                match self.codex_response(request, decision.intent).await {
-                    Ok(result) => Ok(result),
-                    Err(_) => Err((
-                        "INFRASTRUCTURE_AGENT_UNAVAILABLE",
-                        "Infrastructure Agent could not obtain verified data",
-                    )),
+                if decision.intent == "service_availability" {
+                    self.availability_response(message).await
+                } else {
+                    match self.codex_response(request, decision.intent).await {
+                        Ok(result) => Ok(result),
+                        Err(_) => Err((
+                            "INFRASTRUCTURE_AGENT_UNAVAILABLE",
+                            "Infrastructure Agent could not obtain verified data",
+                        )),
+                    }
                 }
             }
             CapabilityRoute::CrossDomainAgents => self.cross_domain_response(request).await,
@@ -185,6 +197,69 @@ impl ConversationService {
             }
         };
         (response, ConversationTimings { routing_ms, llm_ms })
+    }
+
+    async fn availability_response(
+        &self,
+        message: &str,
+    ) -> Result<(String, &'static str), (&'static str, &'static str)> {
+        let provider = self.availability.as_ref().ok_or((
+            "TELEMETRY_UNAVAILABLE",
+            "No pude verificar el estado actual en Prometheus.",
+        ))?;
+        let targets = provider.current_availability().await.map_err(|_| {
+            (
+                "TELEMETRY_UNAVAILABLE",
+                "No pude verificar el estado actual en Prometheus.",
+            )
+        })?;
+        let normalized = normalize_availability_query(message);
+        let selection = availability_selection(&normalized);
+        let selected = targets
+            .iter()
+            .filter(|target| selection.matches(target))
+            .collect::<Vec<_>>();
+        if selected.is_empty() {
+            return Ok((
+                "No encontré ese componente en el inventario verificado de Prometheus.".into(),
+                "infrastructure",
+            ));
+        }
+        if selection == AvailabilitySelection::AllDown {
+            let down = selected
+                .into_iter()
+                .filter(|target| !target.up)
+                .collect::<Vec<_>>();
+            if down.is_empty() {
+                return Ok((
+                    "Prometheus no reporta servicios o equipos caídos en este momento.".into(),
+                    "infrastructure",
+                ));
+            }
+            let names = down
+                .iter()
+                .map(|target| availability_label(target))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Ok((
+                format!("Prometheus reporta caídos: {names}."),
+                "infrastructure",
+            ));
+        }
+        let up = selected.iter().all(|target| target.up);
+        let label = selection.label();
+        let detail = selected
+            .iter()
+            .map(|target| availability_label(target))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Ok((
+            format!(
+                "{label} está {} según Prometheus ({detail}).",
+                if up { "online" } else { "caído o degradado" }
+            ),
+            "infrastructure",
+        ))
     }
 
     async fn cross_domain_response(
@@ -444,6 +519,86 @@ impl ConversationService {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AvailabilitySelection {
+    AllDown,
+    Vpn,
+    Cloudflare,
+    Firewall,
+}
+
+impl AvailabilitySelection {
+    fn matches(self, target: &AvailabilityTarget) -> bool {
+        let name = target.name.to_lowercase();
+        let service = target.service.as_deref().unwrap_or_default().to_lowercase();
+        match self {
+            Self::AllDown => true,
+            Self::Vpn => {
+                name.contains("tailscale") || name.contains("vpn") || service.contains("tailscale")
+            }
+            Self::Cloudflare => {
+                name.contains("cloudflare")
+                    || name.contains("tunnel")
+                    || service.contains("cloudflared")
+            }
+            Self::Firewall => {
+                name.contains("opnsense") || name.contains("pfsense") || name.contains("firewall")
+            }
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::AllDown => "La infraestructura",
+            Self::Vpn => "La VPN",
+            Self::Cloudflare => "El túnel de Cloudflare",
+            Self::Firewall => "El firewall OPNsense/pfSense",
+        }
+    }
+}
+
+fn availability_selection(normalized: &str) -> AvailabilitySelection {
+    if normalized.contains("cloudflare") || normalized.contains("tunnel") {
+        AvailabilitySelection::Cloudflare
+    } else if normalized.contains("pfsense")
+        || normalized.contains("psfesense")
+        || normalized.contains("opnsense")
+        || normalized.contains("firewall")
+    {
+        AvailabilitySelection::Firewall
+    } else if normalized.contains("vpn")
+        || normalized.contains("tailscale")
+        || normalized.contains("uve pene")
+    {
+        AvailabilitySelection::Vpn
+    } else {
+        AvailabilitySelection::AllDown
+    }
+}
+
+fn normalize_availability_query(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|character| match character {
+            'á' => 'a',
+            'é' => 'e',
+            'í' => 'i',
+            'ó' => 'o',
+            'ú' | 'ü' => 'u',
+            other => other,
+        })
+        .collect()
+}
+
+fn availability_label(target: &AvailabilityTarget) -> String {
+    match &target.service {
+        Some(service) => format!("{} / {} (VMID {})", target.name, service, target.vmid),
+        None => format!("{} (VMID {})", target.name, target.vmid),
+    }
+}
+
 fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
 }
@@ -603,8 +758,25 @@ pub enum CodexClientError {
 mod tests {
     use super::*;
     use crate::VoicePipelineConfig;
+    use std::pin::Pin;
     use std::sync::Arc;
     use tokio::sync::Barrier;
+
+    struct FixedAvailability(Vec<AvailabilityTarget>);
+
+    impl AvailabilityProvider for FixedAvailability {
+        fn current_availability(
+            &self,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<Vec<AvailabilityTarget>, crate::TelemetryAdapterError>>
+                    + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async { Ok(self.0.clone()) })
+        }
+    }
 
     fn service(events: EventBus) -> ConversationService {
         let voice = VoicePipeline::new(VoicePipelineConfig {
@@ -615,7 +787,7 @@ mod tests {
             model: "jarvis-fast".into(),
         })
         .expect("voice configuration");
-        ConversationService::new(voice, None, events)
+        ConversationService::new(voice, None, events, None)
     }
 
     fn request(session_id: &str, message: &str) -> CoreRequest {
@@ -628,6 +800,85 @@ mod tests {
             action: None,
             authorization: None,
         }
+    }
+
+    fn service_with_availability(targets: Vec<AvailabilityTarget>) -> ConversationService {
+        let mut service = service(EventBus::default());
+        service.availability = Some(Arc::new(FixedAvailability(targets)));
+        service
+    }
+
+    #[tokio::test]
+    async fn availability_answers_use_current_verified_state() {
+        let service = service_with_availability(vec![
+            AvailabilityTarget {
+                name: "tailscale-vpn".into(),
+                service: None,
+                vmid: "109".into(),
+                up: true,
+            },
+            AvailabilityTarget {
+                name: "tailscale-vpn".into(),
+                service: Some("tailscaled".into()),
+                vmid: "109".into(),
+                up: true,
+            },
+            AvailabilityTarget {
+                name: "cloudflare-tunnel".into(),
+                service: Some("cloudflared".into()),
+                vmid: "105".into(),
+                up: false,
+            },
+            AvailabilityTarget {
+                name: "opnsense".into(),
+                service: None,
+                vmid: "102".into(),
+                up: true,
+            },
+        ]);
+
+        let (vpn, _) = service
+            .availability_response("¿La VPN está online?")
+            .await
+            .expect("VPN response");
+        let (tunnel, _) = service
+            .availability_response("¿El túnel de Cloudflare está activo?")
+            .await
+            .expect("tunnel response");
+        let (firewall, _) = service
+            .availability_response("¿El firewall psfesense está ok?")
+            .await
+            .expect("firewall response");
+
+        assert!(vpn.contains("VPN está online"));
+        assert!(tunnel.contains("caído o degradado"));
+        assert!(firewall.contains("OPNsense/pfSense está online"));
+    }
+
+    #[tokio::test]
+    async fn down_service_list_does_not_depend_on_event_history() {
+        let service = service_with_availability(vec![
+            AvailabilityTarget {
+                name: "freeipa".into(),
+                service: None,
+                vmid: "108".into(),
+                up: false,
+            },
+            AvailabilityTarget {
+                name: "adguard".into(),
+                service: None,
+                vmid: "101".into(),
+                up: true,
+            },
+        ]);
+
+        let (answer, _) = service
+            .availability_response("¿Qué servicios están caídos?")
+            .await
+            .expect("availability response");
+
+        assert!(answer.contains("freeipa (VMID 108)"));
+        assert!(!answer.contains("adguard"));
     }
 
     #[test]

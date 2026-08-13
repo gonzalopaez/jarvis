@@ -79,7 +79,20 @@ async fn run() -> Result<(), &'static str> {
     let events = EventBus::default();
     let codex = load_codex_client()?;
     let codex_configured = codex.is_some();
-    let conversation = ConversationService::new(voice.clone(), codex, events.clone());
+    let prometheus_url = env::var("JARVIS_PROMETHEUS_URL")
+        .map_err(|_| "JARVIS_PROMETHEUS_URL is required")?
+        .parse()
+        .map_err(|_| "JARVIS_PROMETHEUS_URL is invalid")?;
+    let telemetry_instance = env::var("JARVIS_TELEMETRY_INSTANCE")
+        .map_err(|_| "JARVIS_TELEMETRY_INSTANCE is required")?;
+    let prometheus = PrometheusTelemetryAdapter::new(prometheus_url, telemetry_instance)
+        .map_err(|_| "Prometheus telemetry configuration is invalid")?;
+    let conversation = ConversationService::new(
+        voice.clone(),
+        codex,
+        events.clone(),
+        Some(Arc::new(prometheus.clone())),
+    );
     let transport = Transport::with_config(
         gateway,
         authenticator,
@@ -92,14 +105,6 @@ async fn run() -> Result<(), &'static str> {
     .with_codex_configured(codex_configured)
     .with_voice_pipeline(voice)
     .with_conversation_service(conversation);
-    let prometheus_url = env::var("JARVIS_PROMETHEUS_URL")
-        .map_err(|_| "JARVIS_PROMETHEUS_URL is required")?
-        .parse()
-        .map_err(|_| "JARVIS_PROMETHEUS_URL is invalid")?;
-    let telemetry_instance = env::var("JARVIS_TELEMETRY_INSTANCE")
-        .map_err(|_| "JARVIS_TELEMETRY_INSTANCE is required")?;
-    let prometheus = PrometheusTelemetryAdapter::new(prometheus_url, telemetry_instance)
-        .map_err(|_| "Prometheus telemetry configuration is invalid")?;
     let prometheus_alerts = Arc::new(prometheus.clone());
     let telemetry = TelemetryService::new(
         vec![Arc::new(prometheus)],

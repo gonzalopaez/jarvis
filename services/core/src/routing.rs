@@ -142,6 +142,10 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
                 "freeipa",
                 "proxmox",
                 "dominio",
+                "firewall",
+                "pfsense",
+                "psfesense",
+                "opnsense",
             ],
         );
         let service_down_query = service_context
@@ -153,6 +157,20 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
                     "no responde",
                     "inaccesible",
                     "fuera de linea",
+                ],
+            );
+        let service_status_query = service_context
+            && contains_any(
+                &normalized,
+                &[
+                    "online",
+                    "activo",
+                    "activa",
+                    "funciona",
+                    "funcionando",
+                    "esta bien",
+                    "esta ok",
+                    "estado",
                 ],
             );
         let domain_controller_query = normalized.contains("controlador de dominio")
@@ -186,10 +204,18 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
         }
         // Infrastructure telemetry must never fall through to a generic model:
         // it requires verified Prometheus/MCP evidence.
-        if explicit_infrastructure_query {
+        if explicit_infrastructure_query
+            || service_down_query
+            || service_status_query
+            || domain_controller_query
+        {
             return agent(
                 CapabilityRoute::InfrastructureAgent,
-                "infrastructure_diagnostic",
+                if service_down_query || service_status_query || domain_controller_query {
+                    "service_availability"
+                } else {
+                    "infrastructure_diagnostic"
+                },
                 Complexity::Medium,
                 "infrastructure",
                 true,
@@ -217,8 +243,6 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
             );
         }
         if likely_security_alert_query
-            || service_down_query
-            || domain_controller_query
             || contains_any(
                 &normalized,
                 &[
@@ -476,9 +500,10 @@ mod tests {
     }
 
     #[test]
-    fn spoken_down_server_query_uses_security_agent() {
+    fn spoken_down_server_query_uses_live_infrastructure() {
         let decision = route("¿Está caído el servidor de ce?");
-        assert_eq!(decision.route, CapabilityRoute::SecurityAgent);
+        assert_eq!(decision.route, CapabilityRoute::InfrastructureAgent);
+        assert_eq!(decision.intent, "service_availability");
     }
 
     #[test]
@@ -501,15 +526,28 @@ mod tests {
     }
 
     #[test]
-    fn service_down_query_with_context_uses_security_agent() {
+    fn service_down_query_with_context_uses_live_infrastructure() {
         assert_eq!(
             route("El servicio de VPN está caído").route,
-            CapabilityRoute::SecurityAgent
+            CapabilityRoute::InfrastructureAgent
         );
         assert_eq!(
             route("El controlador de dominio no responde").route,
-            CapabilityRoute::SecurityAgent
+            CapabilityRoute::InfrastructureAgent
         );
+    }
+
+    #[test]
+    fn vpn_cloudflare_and_firewall_status_use_live_infrastructure() {
+        for message in [
+            "¿La VPN está online?",
+            "¿El túnel de Cloudflare está activo?",
+            "¿El firewall pfSense está ok?",
+        ] {
+            let decision = route(message);
+            assert_eq!(decision.route, CapabilityRoute::InfrastructureAgent);
+            assert_eq!(decision.intent, "service_availability");
+        }
     }
 
     #[test]
