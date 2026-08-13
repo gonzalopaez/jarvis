@@ -7,9 +7,12 @@ use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     future::Future,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     time::{Duration, Instant},
 };
 
@@ -37,6 +40,10 @@ fn is_affirmative(message: &str) -> bool {
     )
 }
 
+fn is_negative(message: &str) -> bool {
+    matches!(message.trim().to_lowercase().as_str(), "no" | "no.")
+}
+
 fn security_remediation_decision() -> RoutingDecision {
     RoutingDecision {
         route: CapabilityRoute::Codex,
@@ -57,6 +64,7 @@ pub struct ConversationService {
     codex: Option<CodexHttpClient>,
     events: EventBus,
     pending_mitigation: OneTimeGrantStore<String>,
+    pending_alert_details: Arc<Mutex<HashMap<String, (String, Instant)>>>,
     availability: Option<Arc<dyn AvailabilityProvider>>,
 }
 
@@ -79,6 +87,7 @@ impl ConversationService {
             codex,
             events,
             pending_mitigation: OneTimeGrantStore::new(MAX_PENDING_MITIGATIONS),
+            pending_alert_details: Arc::new(Mutex::new(HashMap::new())),
             availability,
         }
     }
@@ -99,7 +108,33 @@ impl ConversationService {
             source: RequestSource::Text,
             mode: AiMode::Auto,
         });
-        if is_affirmative(message) && self.take_pending_mitigation(&request.session_id) {
+        let pending_alert_host = if is_affirmative(message) {
+            self.take_pending_alert_details(&request.session_id)
+        } else {
+            None
+        };
+        let alert_details_declined = if is_negative(message) {
+            self.take_pending_alert_details(&request.session_id)
+                .is_some()
+        } else {
+            false
+        };
+        if pending_alert_host.is_some() || alert_details_declined {
+            decision = RoutingDecision {
+                route: CapabilityRoute::SecurityAgent,
+                intent: if alert_details_declined {
+                    "security_alert_detail_declined"
+                } else {
+                    "security_alert_detail"
+                },
+                complexity: crate::Complexity::Medium,
+                agent: Some("wazuh"),
+                model_alias: None,
+                requires_tools: true,
+                requires_authorization: false,
+                reason: "operator requested details for a session-scoped alert summary",
+            };
+        } else if is_affirmative(message) && self.take_pending_mitigation(&request.session_id) {
             decision = security_remediation_decision();
         }
         let routing_ms = elapsed_ms(routing_started);
@@ -162,7 +197,15 @@ impl ConversationService {
                 }
             }
             CapabilityRoute::CrossDomainAgents => self.cross_domain_response(request).await,
-            CapabilityRoute::SecurityAgent => self.security_response(request),
+            CapabilityRoute::SecurityAgent if alert_details_declined => Ok((
+                "Entendido, no voy a detallar las alertas.".into(),
+                "security",
+            )),
+            CapabilityRoute::SecurityAgent => self.security_response(
+                request,
+                pending_alert_host.as_deref(),
+                pending_alert_host.is_some(),
+            ),
             CapabilityRoute::Automation => Err((
                 "AUTOMATION_UNAVAILABLE",
                 "Automation routing is not connected",
@@ -267,7 +310,7 @@ impl ConversationService {
         request: &CoreRequest,
     ) -> Result<(String, &'static str), (&'static str, &'static str)> {
         let infrastructure = self.codex_response(request, "infrastructure_diagnostic");
-        let security = async { self.security_response(request) };
+        let security = async { self.security_response(request, None, false) };
         let (infrastructure, security) = fan_out_evidence(infrastructure, security).await;
 
         match (infrastructure, security) {
@@ -285,6 +328,8 @@ impl ConversationService {
     fn security_response(
         &self,
         request: &CoreRequest,
+        forced_host: Option<&str>,
+        detail_requested: bool,
     ) -> Result<(String, &'static str), (&'static str, &'static str)> {
         let availability_text = request
             .message
@@ -300,7 +345,9 @@ impl ConversationService {
             || availability_text.contains("servicio")
             || availability_text.contains("servidor");
         let target_query = availability_text;
-        let requested_host = requested_security_host(&target_query);
+        let requested_host = forced_host
+            .map(ToOwned::to_owned)
+            .or_else(|| requested_security_host(&target_query));
         let target = if let Some(host) = requested_host.as_deref() {
             Some(host)
         } else if target_query.contains("vpn") || target_query.contains("uve pene") {
@@ -394,11 +441,18 @@ impl ConversationService {
                 "security",
             ));
         }
+        if let Some(host) = requested_host.as_ref().filter(|_| !detail_requested) {
+            self.issue_pending_alert_details(&request.session_id, host);
+            return Ok((
+                format!(
+                    "El equipo {host} tiene {} alertas Wazuh entre las últimas 20 verificadas. ¿Necesitás que te detalle las alertas? Sí o no.",
+                    alerts.len()
+                ),
+                "security",
+            ));
+        }
         let mut answer = match requested_host {
-            Some(host) => format!(
-                "El equipo {host} tiene {} alertas Wazuh entre las últimas 20 verificadas. ",
-                alerts.len()
-            ),
+            Some(host) => format!("Detalle de alertas Wazuh para el equipo {host}. "),
             None => format!("Hay {} alertas Wazuh {window}. ", alerts.len()),
         };
         for (index, (severity, host, title)) in alerts.drain(..).take(5).enumerate() {
@@ -407,7 +461,7 @@ impl ConversationService {
             }
             answer.push_str(&format!("{}: {} en {}.", severity, title, host));
         }
-        if !availability_only {
+        if !availability_only && !detail_requested {
             let _ = self
                 .pending_mitigation
                 .issue_at(request.session_id.clone(), Instant::now());
@@ -423,6 +477,28 @@ impl ConversationService {
             PENDING_MITIGATION_TTL,
             Instant::now(),
         )
+    }
+
+    fn take_pending_alert_details(&self, session_id: &str) -> Option<String> {
+        let mut pending = self.pending_alert_details.lock().ok()?;
+        let (host, issued_at) = pending.remove(session_id)?;
+        (issued_at.elapsed() <= PENDING_MITIGATION_TTL).then_some(host)
+    }
+
+    fn issue_pending_alert_details(&self, session_id: &str, host: &str) {
+        if let Ok(mut pending) = self.pending_alert_details.lock() {
+            pending.retain(|_, (_, issued_at)| issued_at.elapsed() <= PENDING_MITIGATION_TTL);
+            if pending.len() >= MAX_PENDING_MITIGATIONS && !pending.contains_key(session_id) {
+                if let Some(oldest) = pending
+                    .iter()
+                    .min_by_key(|(_, (_, issued_at))| *issued_at)
+                    .map(|(session, _)| session.clone())
+                {
+                    pending.remove(&oldest);
+                }
+            }
+            pending.insert(session_id.to_owned(), (host.to_owned(), Instant::now()));
+        }
     }
 
     async fn model_response(
@@ -938,7 +1014,11 @@ mod tests {
         let service = service(events);
 
         let (answer, mode) = service
-            .security_response(&request("session-a", "¿Está caído el servidor VPN?"))
+            .security_response(
+                &request("session-a", "¿Está caído el servidor VPN?"),
+                None,
+                false,
+            )
             .expect("security response");
 
         assert_eq!(mode, "security");
@@ -968,13 +1048,28 @@ mod tests {
         let service = service(events);
 
         let (answer, mode) = service
-            .security_response(&request("session-a", "¿El equipo Romina tiene alertas?"))
+            .security_response(
+                &request("session-a", "¿El equipo Romina tiene alertas?"),
+                None,
+                false,
+            )
             .expect("security response");
 
         assert_eq!(mode, "security");
         assert!(answer.contains("equipo romina tiene 1 alertas Wazuh"));
-        assert!(answer.contains("Intento de acceso fallido en Romina"));
+        assert!(answer.contains("¿Necesitás que te detalle las alertas? Sí o no."));
+        assert!(!answer.contains("Intento de acceso fallido"));
         assert!(!answer.contains("Servidor-02"));
+
+        let host = service
+            .take_pending_alert_details("session-a")
+            .expect("pending alert host");
+        let (detail, _) = service
+            .security_response(&request("session-a", "sí"), Some(&host), true)
+            .expect("detail response");
+        assert!(detail.contains("Detalle de alertas Wazuh para el equipo romina"));
+        assert!(detail.contains("Intento de acceso fallido en Romina"));
+        assert!(service.take_pending_alert_details("session-a").is_none());
     }
 
     #[test]
@@ -994,11 +1089,47 @@ mod tests {
         let service = service(events);
 
         let (answer, _) = service
-            .security_response(&request("session-a", "¿El equipo Romina tiene alertas?"))
+            .security_response(
+                &request("session-a", "¿El equipo Romina tiene alertas?"),
+                None,
+                false,
+            )
             .expect("security response");
 
         assert!(answer.contains("No encontré alertas Wazuh para el equipo romina"));
         assert!(!answer.contains("Servidor-02"));
+    }
+
+    #[tokio::test]
+    async fn declining_alert_details_is_session_scoped_and_does_not_call_a_model() {
+        let events = EventBus::default();
+        events.publish(
+            EventType::SecurityAlert,
+            None,
+            json!({
+                "id": "wazuh-romina",
+                "host": "Romina",
+                "severity": "medium",
+                "title": "Cambio de cuenta",
+                "description": "Cambio detectado"
+            }),
+        );
+        let service = service(events);
+        let summary = service
+            .handle(&request("session-a", "¿El equipo Romina tiene alertas?"))
+            .await;
+        assert!(summary.data.expect("summary data")["message"]
+            .as_str()
+            .expect("summary")
+            .contains("¿Necesitás que te detalle"));
+
+        let declined = service.handle(&request("session-a", "no")).await;
+        assert_eq!(declined.status, ResponseStatus::Completed);
+        assert_eq!(
+            declined.data.expect("declined data")["message"],
+            "Entendido, no voy a detallar las alertas."
+        );
+        assert!(service.take_pending_alert_details("session-a").is_none());
     }
 
     #[test]
@@ -1017,7 +1148,11 @@ mod tests {
         );
         let service = service(events);
         service
-            .security_response(&request("session-a", "Mostrame las alertas críticas"))
+            .security_response(
+                &request("session-a", "Mostrame las alertas críticas"),
+                None,
+                false,
+            )
             .expect("security response");
 
         assert!(!service.take_pending_mitigation("session-b"));
