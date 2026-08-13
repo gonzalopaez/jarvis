@@ -119,6 +119,9 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
                     "ultima",
                     "minuto",
                     "hora",
+                    "equipo",
+                    "host",
+                    "maquina",
                 ],
             );
         // "caido"/"caida"/"dominio" are too generic to route on their own
@@ -510,6 +513,18 @@ mod tests {
             route("El controlador de dominio no responde").route,
             CapabilityRoute::SecurityAgent
         );
+    }
+
+    #[test]
+    fn named_equipment_alert_query_uses_security_evidence() {
+        for message in [
+            "¿El equipo Romina tiene alertas?",
+            "¿Qué alertas tiene el host romina?",
+        ] {
+            let decision = route(message);
+            assert_eq!(decision.route, CapabilityRoute::SecurityAgent);
+            assert_eq!(decision.intent, "security_analysis");
+        }
     }
 
     #[test]
