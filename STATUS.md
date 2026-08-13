@@ -1,5 +1,8 @@
 # JARVIS deployment status
 
+> Current-session handoff: see [`SESSION_CONTEXT.md`](SESSION_CONTEXT.md).
+> It records production changes verified after this older status snapshot.
+
 Last verified against the live server: **2026-08-11**.
 
 This file records what was tested directly against running services, not what
