@@ -1,6 +1,6 @@
 # Jarvis Core
 
-Jarvis Core is the security and policy boundary behind the future single Desktop API.
+Jarvis Core is the security and policy boundary behind the single Desktop API.
 
 ## Implemented foundation
 
@@ -30,6 +30,10 @@ Jarvis Core is the security and policy boundary behind the future single Desktop
 - exact-Origin and CSRF enforcement for cookie-authenticated writes.
 - normalized Telemetry Service with bounded collection intervals and adapter deadlines as a required boundary;
 - explicit unavailable Prometheus adapter that never emits fabricated metrics.
+- Tier 1 read, Tier 2 reversible-containment and Tier 3 infrastructure rules;
+- single-use, session-scoped grants and exact Tier 3 resource confirmation;
+- proposal-only Wazuh and Proxmox agent boundaries;
+- parallel, deadline-bounded cross-domain evidence collection.
 
 The executable fails closed unless `JARVIS_CORE_BIND` contains a validated private socket address and systemd provides `auth-registry.json` through `CREDENTIALS_DIRECTORY`. The registry contains only SHA-256 digests with server-owned subjects and roles; raw Bearer values are prohibited. The deployment unit binds explicitly to the private Core workload address. TLS termination and trusted proxy handling remain separate reviewed work.
 
@@ -39,7 +43,13 @@ The Codex expert-agent adapter is connected and reports `READY`; the Prometheus
 telemetry adapter consumes real `jarvis_proxmox_guest_up` / `jarvis_proxmox_service_up`
 metrics (see ADR-011). No n8n, OpenBao, shell or infrastructure *write* adapter is connected.
 
-The deployed executor is intentionally disabled. Health, governed conversation, telemetry and read-only security alert paths can be exercised, but no infrastructure action can execute until a capability-specific executor passes a separate review.
+The deployed executor is intentionally disabled. Agents can forward structured
+proposals to Core, where policy and authorization are enforced, but no
+infrastructure or containment action can execute until a capability-specific
+executor passes a separate review. See `tier_1_is_allowed_immediately`,
+`domain_agent_cannot_issue_its_own_grant` and
+`domain_agent_cannot_submit_human_confirmation`; implementation baseline
+`a2f37e0`.
 
 ## LiteLLM request budget
 

@@ -18,8 +18,11 @@ in caller code.
 ## What remains future
 
 - MCP and Agent Gateway routing *through* LiteLLM (ADR-008) is not wired yet.
-- Forwarding a verdict's `proposed_actions` to Core's action endpoint is a
-  separate, not-yet-implemented contract; the RestrictedExecutor stays disabled.
+- Executing approved actions remains future. Wazuh Agent already forwards
+  allow-listed `proposed_actions` to Core as action requests; Core stops them at
+  the authorization boundary while `RestrictedExecutor` is disabled. Evidence:
+  `test_proposal_reaches_core_as_action_and_is_not_executed_by_agent`,
+  `protected_actions_stop_at_authorization_boundary`, merge `199037a`.
 
 ## config.yaml
 

@@ -2,9 +2,24 @@
 
 ## Status
 
-Proposed — 2026-08-11. Supersedes the implicit split between Core, n8n and MCP
-Gateway that grew organically. Does not require a rewrite: existing components
-are re-scoped, not discarded.
+Accepted — implemented in stages 0–5 as of `a2f37e0` (2026-08-12).
+Supersedes the implicit split between Core, n8n and MCP Gateway that grew
+organically. Existing components were re-scoped rather than rewritten.
+
+Implementation record:
+
+| Stage | Result | Evidence |
+|---:|---|---|
+| 0 | Architecture and capability catalog defined | `caa91cf` |
+| 1 | Capability catalog added | PR #4, `e54124c` |
+| 2 | Tier 1/2/3 rules enforced by `PolicyEngine` | PR #4, `e54124c` |
+| 3 | Proposal-only Wazuh Agent added | `45aa91d`, merge `199037a` |
+| 4 | Core HTTP authorization and proposal-only Proxmox Agent added | PR #5, `627ad43`; `0c4b3dd`, merge `4131336` |
+| 5 | Cross-domain evidence fan-out made parallel with a bounded latency budget | `5d507e2`, `e1ab502`, merge `a2f37e0` |
+
+This acceptance covers the code and test evidence in `a2f37e0`. It does not
+assert that every stage is deployed in production; `STATUS.md` records that
+distinction.
 
 ## Context
 
@@ -45,7 +60,7 @@ never direct calls to FreeIPA/Wazuh Active Response.
 
 ### 2. Capability tiers, not a single authorization rule
 
-Every capability in the (still-to-be-populated) `PolicyEngine` gets a tier.
+Every capability in `PolicyEngine` has a tier.
 Tier is a first-class field of the capability, not an ad hoc branch in code:
 
 | Tier | Examples | Authorization |
@@ -54,7 +69,7 @@ Tier is a first-class field of the capability, not an ad hoc branch in code:
 | 2 — reversible containment | `security.user.disable`, `security.ip.block`, `security.host.isolate` | One human, single-use grant, 5-minute expiry (existing `ConversationService` confirmation pattern). |
 | 3 — infrastructure create/destroy | `proxmox.vm.deploy`, `proxmox.vm.destroy`, `proxmox.ct.destroy` | One human, **typed confirmation of the exact resource name/ID**, 2-minute expiry, mandatory `rollback_plan` field populated before the confirmation UI is even shown. |
 
-Tier 3 is new — nothing in the repo has this shape today. It is deliberately
+Tier 3 was introduced by this ADR. It is deliberately
 more expensive to trigger than Tier 2: destroying infrastructure is not
 symmetric with containing a threat, and the authorization UX should feel
 different, not just gate the same button behind one more click.
@@ -84,14 +99,14 @@ the Wazuh/Proxmox agents.
 
 ## Consequences
 
-- `PolicyEngine::default()` needs real rules with tiers, not the 2 placeholder
-  rules it has today (tracked as STATUS.md gap #4 — this ADR defines the
-  shape those rules should take).
+- `PolicyEngine::default()` enforces the tiered capability catalog. Tier 2 and
+  Tier 3 grants are single-use and session-scoped; Tier 3 additionally requires
+  an exact resource confirmation and rollback plan.
 - The n8n↔Core action-forwarding contract discussed earlier (verdict →
   `kind: "action"` request) still applies, but the verdict itself now
   originates from Central's reasoning over evidence the Wazuh agent supplied
   — not from n8n's own L1/L2 nodes deciding independently.
-- A new capability category (Tier 3) needs its own confirmation UI in the
+- Tier 3 still needs its own confirmation UI in the
   HUD — the existing 5-minute/one-time confirmation component isn't
   sufficient as-is; it needs a typed-confirmation variant.
 - `feature/qdrant-infra-rag` should be re-evaluated against this ADR before

@@ -2,24 +2,32 @@
 
 JARVIS is a security-first client-server AI system with a lightweight cinematic Web UI, an optional transitional Tauri client, a single governed Core API, modular services, and explicit trust boundaries.
 
-## v0.1-clean
+## Current baseline
 
-This baseline contains only:
+`origin/main@a2f37e0` contains:
 
 - the approved cinematic Desktop HUD;
 - real local Linux telemetry exposed by a narrow Tauri command;
 - a typed in-process Event Bus;
-- provider-neutral mock adapters;
+- the governed Core API, private Voice and MCP service contracts;
+- LiteLLM model aliases and bounded Codex routing;
+- a tiered `PolicyEngine` with proposal-only Wazuh and Proxmox agents;
+- parallel cross-domain evidence collection;
 - tests and architecture/security documentation.
 
-No external backend, model provider, automation platform, voice backend, infrastructure API, credential store, shell executor, or production deployment is connected.
+Production verification and test-only implementation are intentionally kept
+separate in [STATUS.md](STATUS.md). Write execution remains disabled.
 
 ## Trust boundary
 
     Browser / transitional Tauri client -> HTTPS/WSS
       -> internal DNS -> Nginx TLS Gateway -> Jarvis Core
 
-Jarvis Core will own all future connections to LiteLLM, n8n, Voice Service, Codex Bridge, MCP/agents and infrastructure adapters. Secrets belong in OpenBao and must never enter source control, Desktop configuration, prompts, model context, logs, or tool output.
+Jarvis Core owns the governed boundary to LiteLLM, Voice, Codex and domain
+agents. n8n performs mechanical correlation and notification; domain agents
+may submit proposals but cannot authorize themselves. Secrets belong in
+OpenBao and must never enter source control, Desktop configuration, prompts,
+model context, logs, or tool output.
 
 Sensitive actions must follow:
 
