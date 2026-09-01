@@ -53,6 +53,13 @@ production audit records and are not represented as such.
 
 ## Trabajo pendiente de reconciliar
 
+- The AMD Radeon RX 5600 XT at PCI `0000:03:00` is shared by configuration:
+  VM110 (`Ubuntu-RDP`) declares it as `hostpci0`, while CT116
+  (`originalOllama`) consumes the host `amdgpu` DRM devices. They cannot use
+  the GPU simultaneously. CT116 is the default consumer as of 2026-09-01; do
+  not start VM110 without stopping CT116 first. A future scheduling or
+  ownership policy must make this exclusion enforceable instead of relying on
+  operator procedure.
 - `feature/voice-latency-instrumentation` is not merged. It contains the GPU
   passthrough fix and voice-latency instrumentation. Audit and merge belong to
   a separate stage.
