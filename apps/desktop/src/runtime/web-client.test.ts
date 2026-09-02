@@ -11,7 +11,7 @@ describe("WebRuntimeClient", () => {
     expect(health.online).toBe(true);
     expect(health.apiVersion).toBe("v1");
     expect(health.status).toBe("degraded");
-    expect(health.components).toHaveLength(8);
+    expect(health.components).toHaveLength(7);
     expect(fetcher).toHaveBeenCalledWith("/api/v1/health", expect.objectContaining({
       credentials: "same-origin",
       redirect: "error",
@@ -83,7 +83,7 @@ describe("WebRuntimeClient", () => {
 });
 
 function healthFixture(): object {
-  const components = ["core", "codex", "voice", "memory", "n8n", "monitor", "security", "mcp"]
+  const components = ["core", "codex", "voice", "mcp", "n8n", "wazuh", "proxmox"]
     .map((id, index) => ({
       id,
       label: id.toUpperCase(),

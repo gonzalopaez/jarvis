@@ -1191,15 +1191,19 @@ fn component_health(codex_configured: bool) -> Vec<ComponentHealth> {
         error: (!codex_configured).then_some("not_connected"),
     };
     let unavailable = [
-        ("voice", "VOICE ENGINE"),
-        ("memory", "MEMORY"),
-        ("n8n", "N8N"),
-        ("monitor", "SYSTEM MONITOR"),
-        ("security", "SECURITY AGENT"),
-        ("mcp", "MCP GATEWAY"),
+        ("voice", "VOICE SERVICE", "not_connected"),
+        ("mcp", "MCP GATEWAY", "not_connected"),
+        ("n8n", "N8N", "not_connected"),
+        ("wazuh", "WAZUH AGENT", "not_connected"),
+        // Proxmox Agent has no network-reachable health surface today (it runs
+        // as a stdin/stdout MCP subprocess, not a persistent daemon), so it is
+        // never updated by a poller. This is a distinct, permanent error code
+        // from "not_connected" so the raw API response doesn't imply a check
+        // that isn't actually happening.
+        ("proxmox", "PROXMOX AGENT", "not_instrumented"),
     ]
     .into_iter()
-    .map(|(id, label)| ComponentHealth {
+    .map(|(id, label, error)| ComponentHealth {
         id,
         label,
         status: OperationalHealth::Unavailable,
@@ -1207,7 +1211,7 @@ fn component_health(codex_configured: bool) -> Vec<ComponentHealth> {
         version: "not_connected",
         latency_ms: None,
         last_seen_ms: None,
-        error: Some("not_connected"),
+        error: Some(error),
     });
     std::iter::once(core)
         .chain(std::iter::once(codex))

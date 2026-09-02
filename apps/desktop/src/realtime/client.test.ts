@@ -56,7 +56,33 @@ describe("RealtimeClient", () => {
     socket.onopen?.(new Event("open"));
     socket.onmessage?.({ data: JSON.stringify(snapshotEnvelope()) } as MessageEvent);
     expect(health).toHaveBeenCalledOnce();
-    expect(health.mock.calls[0][0].components).toHaveLength(8);
+    expect(health.mock.calls[0][0].components).toHaveLength(7);
+  });
+
+  it("maps the Wazuh relay source status onto the Wazuh Agent tile", async () => {
+    installDom();
+    const bus = new EventBus<AppEvents>();
+    const agent = vi.fn();
+    bus.on("realtime.agent.changed", agent);
+    const socket = new FakeSocket();
+    const client = new RealtimeClient(bus, runtime(true), () => socket, () => 0);
+    await client.start();
+    socket.onopen?.(new Event("open"));
+    socket.onmessage?.({
+      data: JSON.stringify({
+        event_version: "v1",
+        event_id: "event-0000000000000002",
+        type: "telemetry.source.status",
+        timestamp_ms: 1,
+        payload: { source: "wazuh", status: "healthy" },
+      }),
+    } as MessageEvent);
+    expect(agent).toHaveBeenCalledOnce();
+    expect(agent.mock.calls[0][0]).toMatchObject({
+      id: "wazuh",
+      label: "WAZUH AGENT",
+      agentStatus: "realtime",
+    });
   });
 
   it("normalizes realtime telemetry without polling the browser", async () => {
@@ -147,7 +173,7 @@ function installDom(): void {
 }
 
 function snapshotEnvelope(): object {
-  const components = ["core", "codex", "voice", "memory", "n8n", "monitor", "security", "mcp"]
+  const components = ["core", "codex", "voice", "mcp", "n8n", "wazuh", "proxmox"]
     .map((id, index) => ({
       id,
       label: id.toUpperCase(),
