@@ -1,0 +1,20 @@
+groups:
+  - name: jarvis-gpu
+    rules:
+      - alert: JarvisGpuPassthroughUnavailable
+        expr: jarvis_gpu_passthrough_ok{vmid="116"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: GPU passthrough is unavailable in the Ollama container
+          description: CT116 does not expose its expected GPU render character device.
+
+      - alert: JarvisGpuPassthroughMetricMissing
+        expr: absent(jarvis_gpu_passthrough_ok{vmid="116"})
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: GPU passthrough telemetry is missing
+          description: Prometheus has not received the CT116 GPU passthrough gauge.

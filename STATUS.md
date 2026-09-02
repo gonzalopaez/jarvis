@@ -53,9 +53,22 @@ production audit records and are not represented as such.
 
 ## Trabajo pendiente de reconciliar
 
-- `feature/voice-latency-instrumentation` is not merged. It contains the GPU
-  passthrough fix and voice-latency instrumentation. Audit and merge belong to
-  a separate stage.
+- The AMD Radeon RX 5600 XT at PCI `0000:03:00` is shared by configuration:
+  VM110 (`Ubuntu-RDP`) declares it as `hostpci0`, while CT116
+  (`originalOllama`) consumes the host `amdgpu` DRM devices. They cannot use
+  the GPU simultaneously. CT116 is the default consumer as of 2026-09-01; do
+  not start VM110 without stopping CT116 first. A future scheduling or
+  ownership policy must make this exclusion enforceable instead of relying on
+  operator procedure.
+- CT116 GPU inference was verified on 2026-09-01 at 165 generated tokens/s
+  with all 17 model layers loaded through Vulkan. This verifies the current
+  running host/container state, not boot persistence. Survival of a complete
+  Proxmox host reboot remains unverified and requires a coordinated downtime
+  window.
+- The remaining commits on `feature/voice-latency-instrumentation` are not
+  merged as a unit. Their unrelated scope must continue through separate audit
+  and merge stages; the historical GPU commit on that branch is superseded by
+  the reconciled v2 hook and configuration in this branch.
 - `feature/qdrant-infra-rag` is not merged. The historical
   `ADR-013` / `ADR-014-prometheus-live-agent-context.md` conflict remains
   unresolved and must not be resolved in this documentation stage.
