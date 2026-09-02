@@ -67,7 +67,7 @@ down, and were there any recent alerts on it"), Core requests it from all
 relevant agents concurrently — not sequentially — with an explicit, bounded
 timeout on every downstream call (`JARVIS_CODEX_TASK_TIMEOUT_SECONDS`,
 enforced between 10s and 600s) rather than an unbounded wait. See
-`combined_host_alert_evidence_is_requested_concurrently` and
+`cross_domain_evidence_is_requested_concurrently` and
 `audit_ids_remain_unique_during_concurrent_fan_out` for the enforced
 behavior.
 
