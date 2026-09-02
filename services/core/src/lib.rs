@@ -1,3 +1,5 @@
+#[cfg(feature = "network-server")]
+mod agent_health;
 mod audit;
 mod auth;
 mod codex;
@@ -18,6 +20,8 @@ mod validation;
 #[cfg(feature = "network-server")]
 mod voice;
 
+#[cfg(feature = "network-server")]
+pub use agent_health::{AgentHealthCheck, AgentHealthPoller, DEFAULT_AGENT_HEALTH_INTERVAL};
 pub use audit::{AuditEvent, AuditSink, MemoryAuditSink};
 pub use auth::{
     BearerAuthenticator, CredentialConfigError, CredentialRecord, MAX_BEARER_BYTES,

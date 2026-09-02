@@ -21,12 +21,11 @@ export class JarvisStore {
     agents: [
       { id: "core", label: "JARVIS CORE", state: "offline", detail: "CONNECTING", simulated: false },
       { id: "codex", label: "CODEX CORE", state: "offline", detail: "NOT CONNECTED", simulated: false },
-      { id: "voice", label: "VOICE ENGINE", state: "offline", detail: "NOT CONNECTED", simulated: false },
-      { id: "memory", label: "MEMORY", state: "offline", detail: "NOT CONNECTED", simulated: false },
-      { id: "n8n", label: "N8N", state: "offline", detail: "NOT CONNECTED", simulated: false },
-      { id: "monitor", label: "SYSTEM MONITOR", state: "offline", detail: "INITIALIZING", simulated: false },
-      { id: "security", label: "SECURITY AGENT", state: "offline", detail: "NOT CONNECTED", simulated: false },
+      { id: "voice", label: "VOICE SERVICE", state: "offline", detail: "NOT CONNECTED", simulated: false },
       { id: "mcp", label: "MCP GATEWAY", state: "offline", detail: "NOT CONNECTED", simulated: false },
+      { id: "n8n", label: "N8N", state: "offline", detail: "NOT CONNECTED", simulated: false },
+      { id: "wazuh", label: "WAZUH AGENT", state: "offline", detail: "NOT CONNECTED", simulated: false },
+      { id: "proxmox", label: "PROXMOX AGENT", state: "offline", detail: "NOT INSTRUMENTED", simulated: false },
     ],
     activity: [],
     userTranscript: "Awaiting operator input.",
@@ -41,30 +40,14 @@ export class JarvisStore {
     this.bus.on("telemetry.updated", (telemetry) => {
       this.model.telemetry = telemetry;
       this.model.telemetryOnline = true;
-      const monitor = this.model.agents.find((agent) => agent.id === "monitor");
-      if (monitor) {
-        monitor.state = "realtime";
-        monitor.detail = "LIVE DATA";
-      }
       this.publish();
     });
     this.bus.on("telemetry.failed", ({ message }) => {
       this.model.telemetryOnline = false;
-      const monitor = this.model.agents.find((agent) => agent.id === "monitor");
-      if (monitor) {
-        monitor.state = "degraded";
-        monitor.detail = "DATA LINK LOST";
-      }
       this.addActivity("TELEMETRY", message, "error");
     });
     this.bus.on("telemetry.unavailable", ({ message }) => {
       this.model.telemetryOnline = false;
-      const monitor = this.model.agents.find((agent) => agent.id === "monitor");
-      if (monitor) {
-        monitor.state = "offline";
-        monitor.detail = "REALTIME GATEWAY PENDING";
-        monitor.simulated = false;
-      }
       this.addActivity("TELEMETRY", message, "info");
     });
     this.bus.on("core.health.updated", (health) => {

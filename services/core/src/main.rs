@@ -1,10 +1,12 @@
 use jarvis_core::{
-    bind_private, run_prometheus_availability_until, serve_until, ActionRequest, AuditEvent,
-    AuditSink, BearerAuthenticator, CodexHttpClient, ConversationService, CoreGateway,
-    CredentialRecord, EventBus, ExecutionResult, PolicyEngine, Principal,
-    PrometheusTelemetryAdapter, RestrictedExecutor, TelemetryService, Transport, TransportConfig,
-    VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller, DEFAULT_TELEMETRY_INTERVAL,
+    bind_private, run_prometheus_availability_until, serve_until, ActionRequest, AgentHealthCheck,
+    AgentHealthPoller, AuditEvent, AuditSink, BearerAuthenticator, CodexHttpClient,
+    ConversationService, CoreGateway, CredentialRecord, EventBus, ExecutionResult, PolicyEngine,
+    Principal, PrometheusTelemetryAdapter, RestrictedExecutor, TelemetryService, Transport,
+    TransportConfig, VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller,
+    DEFAULT_TELEMETRY_INTERVAL,
 };
+use reqwest::Url;
 use serde::Deserialize;
 use serde_json::json;
 use std::{env, fs, net::SocketAddr, path::Path, sync::Arc};
@@ -132,6 +134,39 @@ async fn run() -> Result<(), &'static str> {
         }
     };
 
+    let mut agent_health_checks = vec![AgentHealthCheck {
+        id: "voice",
+        label: "VOICE SERVICE",
+        url: agent_health_url(
+            &env::var("JARVIS_VOICE_URL").map_err(|_| "JARVIS_VOICE_URL is required")?,
+            "v1/health",
+            "JARVIS_VOICE_URL is invalid",
+        )?,
+    }];
+    if let Some(check) = optional_agent_health_check(
+        "JARVIS_MCP_URL",
+        "JARVIS_MCP_URL is invalid",
+        "mcp",
+        "MCP GATEWAY",
+        "v1/health",
+    )? {
+        agent_health_checks.push(check);
+    }
+    if let Some(check) = optional_agent_health_check(
+        "JARVIS_N8N_URL",
+        "JARVIS_N8N_URL is invalid",
+        "n8n",
+        "N8N",
+        "healthz",
+    )? {
+        agent_health_checks.push(check);
+    }
+    let agent_health_task = {
+        let poller = AgentHealthPoller::new(agent_health_checks)
+            .map_err(|_| "agent health poller configuration is invalid")?;
+        tokio::spawn(poller.run_until(transport.event_bus(), std::future::pending()))
+    };
+
     eprintln!("jarvis-core ready on {bind_address}");
     let result = serve_until(listener, transport, shutdown_signal())
         .await
@@ -144,7 +179,39 @@ async fn run() -> Result<(), &'static str> {
         task.abort();
         let _ = task.await;
     }
+    agent_health_task.abort();
+    let _ = agent_health_task.await;
     result
+}
+
+fn agent_health_url(
+    base_url: &str,
+    health_path: &str,
+    invalid_message: &'static str,
+) -> Result<Url, &'static str> {
+    let base: Url = base_url.parse().map_err(|_| invalid_message)?;
+    base.join(health_path).map_err(|_| invalid_message)
+}
+
+fn optional_agent_health_check(
+    env_var: &'static str,
+    invalid_message: &'static str,
+    id: &'static str,
+    label: &'static str,
+    health_path: &str,
+) -> Result<Option<AgentHealthCheck>, &'static str> {
+    let Some(value) = env::var(env_var)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        eprintln!("jarvis-core agent health check for {id} disabled: {env_var} is not configured");
+        return Ok(None);
+    };
+    Ok(Some(AgentHealthCheck {
+        id,
+        label,
+        url: agent_health_url(&value, health_path, invalid_message)?,
+    }))
 }
 
 fn load_codex_client() -> Result<Option<CodexHttpClient>, &'static str> {
