@@ -1,38 +1,89 @@
 # Architecture
 
-## Target system boundary
+## System boundary
 
 ```mermaid
 flowchart LR
-    B[Notebook Browser] -->|HTTPS/WSS| N[AdGuard DNS + Nginx TLS]
+    B[Browser] -->|HTTPS/WSS| N[Nginx TLS Gateway]
     N --> W[Static Web UI]
-    N --> C[JARVIS Core API]
+    N --> C[Jarvis Core]
     C --> E[Event Bus]
-    C --> A[Authorization Service]
-    E --> G[WebSocket Gateway]
+    C --> P[PolicyEngine]
     C --> T[Telemetry Service]
-    T --> P[Prometheus]
-    T --> S[Security Service]
-    S --> Z[Wazuh]
-    C --> X[Codex Service]
-    C --> M[MCP Gateway]
-    C --> V[Voice Service]
-    A --> M
-    A --> X
+    T --> Prom[Prometheus]
+    C --> Codex[Codex / LiteLLM]
+    C --> Voice[Voice Service]
+    WA[Wazuh Agent] -->|proposals| C
+    PA[Proxmox Agent] -->|proposals| C
+    WA --> MCP[MCP Gateway read-only]
+    PA --> MCP
 ```
 
-The browser depends only on same-origin Web UI, API and WebSocket routes exposed by Nginx. It never receives internal service addresses, provider credentials, infrastructure credentials or OpenBao access.
+The browser depends only on same-origin Web UI, API and WebSocket routes
+exposed by Nginx. It never receives internal service addresses, provider
+credentials, infrastructure credentials, or OpenBao access.
 
-## Current feature state
+## The authorization chain
 
-The Web UI and Core gateway foundation are implemented. The frontend selects a runtime-neutral client: Tauri retains its native HTTPS credential boundary, while a normal browser uses same-origin HTTP and can currently access only minimal health. Authenticated browser commands intentionally remain blocked until secure server-side sessions are implemented. Conversation responses in the transitional Tauri path remain explicitly mock-only and no model, executor or downstream service is connected.
+Every capability in the system — read, contain, or destroy — is evaluated
+through the same chain, with no shortcuts:
+`RestrictedExecutor` is deployed today and intentionally returns
+`EXECUTOR_DISABLED` unconditionally. The rest of the chain — including the
+human-authorization step — is implemented and exercised end-to-end by tests
+covering both Wazuh Agent and Proxmox Agent proposals; only the final
+execution step is gated shut on purpose (see
+[ADR-014](adr/ADR-014-multi-agent-architecture.md)). Production deployment
+status for each stage of the chain is tracked separately in
+[`STATUS.md`](../STATUS.md).
 
-The browser does not collect host telemetry. The previous Tauri `sysinfo` path remains available only for transitional compatibility; server telemetry will arrive through the future Event Bus and WebSocket Gateway.
+## Capability tiers (ADR-014)
 
-The server Event Bus and authenticated WebSocket Gateway provide normalized snapshots, incremental envelopes, heartbeat and slow-consumer resynchronization. The browser client connects only after validating an existing server session, applies realtime state and Agent Matrix updates, backs off with jitter and suspends work in background tabs. Trusted session issuance remains intentionally unresolved; the gateway does not downgrade to anonymous access.
+| Tier | Examples | Authorization |
+|---|---|---|
+| 1 — read-only | `wazuh.alerts.read`, `proxmox.guest.status`, `core.health.read` | None |
+| 2 — reversible containment | `security.user.disable`, `security.ip.block`, `security.host.isolate` | One human, single-use grant, 5-minute expiry |
+| 3 — infrastructure create/destroy | `proxmox.vm.deploy`, `proxmox.vm.destroy`, `proxmox.ct.destroy` | One human, typed confirmation of the exact resource name, mandatory `rollback_plan`, 2-minute expiry |
 
-The Telemetry Service now owns the operational observability boundary. Source adapters return a strict normalized model, invalid samples are rejected, and only bounded events reach the browser. The initial Prometheus adapter is explicitly unavailable until runtime connectivity is configured; it does not generate mock CPU, memory or network values.
+The full, machine-readable catalog lives in `contracts/data/capabilities.json`.
+A domain agent can only *propose* a capability declared as its own; it can
+never issue its own authorization grant — enforced in code and covered by
+`domain_agent_cannot_issue_its_own_grant` and
+`domain_agent_cannot_submit_human_confirmation`.
 
-Other external components remain boundaries and mocks. Future services communicate through versioned contracts in contracts/.
+## One brain, many evidence sources
 
-Infrastructure workloads will run in isolated Proxmox VMs/LXCs with explicit firewall rules. No service is public unless a documented requirement, threat review and authorization justify exposure.
+Jarvis Core's `ConversationService` is the only place that forms a
+verdict or decides what to do next. Every domain agent — Wazuh Agent,
+Proxmox Agent, and any future agent — follows the same shape: it exposes
+read tools over its own domain and a declared set of proposable
+capabilities, and nothing else. None of them call a reasoning model
+independently; Wazuh Agent's own L1/L2 triage uses scoped LiteLLM aliases
+(`jarvis-soc-l1`, `jarvis-soc-l2`) for classification, but the capability
+proposals it emits are evaluated exclusively by Core's `PolicyEngine`, not
+by the agent itself.
+
+When a question needs evidence from more than one domain (e.g. "is the DC
+down, and were there any recent alerts on it"), Core requests it from all
+relevant agents concurrently — not sequentially — with an explicit, bounded
+timeout on every downstream call (`JARVIS_CODEX_TASK_TIMEOUT_SECONDS`,
+enforced between 10s and 600s) rather than an unbounded wait. See
+`combined_host_alert_evidence_is_requested_concurrently` and
+`audit_ids_remain_unique_during_concurrent_fan_out` for the enforced
+behavior.
+
+## Current implementation state
+
+This section intentionally stays short — [`STATUS.md`](../STATUS.md) is the
+canonical, evidence-cited source of truth for what's implemented, tested,
+or still pending, and is updated every time a stage lands. Don't duplicate
+that table here; it will drift.
+
+## Infrastructure
+
+Workloads run in isolated Proxmox LXCs/VMs with explicit firewall rules
+(`deploy/nftables/`). No service is public unless a documented requirement,
+threat review, and authorization justify exposure. Proxmox guest/service
+state is exported into Prometheus via a textfile collector — see
+[ADR-011](adr/ADR-011-proxmox-textfile-exporter.md). GPU-accelerated local
+inference (Ollama, Vulkan/RADV) on a dedicated passthrough LXC is in
+progress on an unmerged branch and is not yet part of this baseline.

@@ -1,41 +1,76 @@
 # J.A.R.V.I.S
 
-JARVIS is a security-first client-server AI system with a lightweight cinematic Web UI, an optional transitional Tauri client, a single governed Core API, modular services, and explicit trust boundaries.
+**A security-first, multi-agent SOC assistant — self-hosted, one governed brain, many evidence sources.**
 
-## Current baseline
+JARVIS observes infrastructure and security signals across a homelab (Proxmox, Wazuh, Prometheus), reasons about them through a single governed Core, and proposes — but never silently executes — actions. Every capability is tiered by risk, every action requires a human-issued, single-use grant, and every domain agent can only gather evidence and propose — authorization lives in exactly one place.
 
-`origin/main@a2f37e0` contains:
+---
 
-- the approved cinematic Desktop HUD;
-- real local Linux telemetry exposed by a narrow Tauri command;
-- a typed in-process Event Bus;
-- the governed Core API, private Voice and MCP service contracts;
-- LiteLLM model aliases and bounded Codex routing;
-- a tiered `PolicyEngine` with proposal-only Wazuh and Proxmox agents;
-- parallel cross-domain evidence collection;
-- tests and architecture/security documentation.
+## Why this exists
 
-Production verification and test-only implementation are intentionally kept
-separate in [STATUS.md](STATUS.md). Write execution remains disabled.
+Most "AI SOC" demos wire an LLM straight into infrastructure and hope for the best. JARVIS is built around the opposite assumption: **the model is never the thing that decides whether something happens.** A tiered policy engine is. The architecture in one sentence:
 
-## Trust boundary
+> Domain agents observe and propose. Jarvis Core reasons and decides. A human authorizes. Nothing executes without all three.
 
-    Browser / transitional Tauri client -> HTTPS/WSS
-      -> internal DNS -> Nginx TLS Gateway -> Jarvis Core
+## Architecture
 
-Jarvis Core owns the governed boundary to LiteLLM, Voice, Codex and domain
-agents. n8n performs mechanical correlation and notification; domain agents
-may submit proposals but cannot authorize themselves. Secrets belong in
-OpenBao and must never enter source control, Desktop configuration, prompts,
-model context, logs, or tool output.
+```mermaid
+flowchart TB
+    subgraph Interface
+        HUD["Web HUD<br/>(realtime, voice)"]
+    end
 
-Sensitive actions must follow:
+    subgraph Core["Jarvis Core — the only decision boundary"]
+        Reasoning["Single reasoning path<br/>(jarvis-fast / jarvis-reasoning via LiteLLM)"]
+        Policy["PolicyEngine<br/>Tier 1 read · Tier 2 containment · Tier 3 infra"]
+        Executor["RestrictedExecutor<br/>(disabled)"]
+        Reasoning --> Policy
+        Policy --> Executor
+    end
 
-    Structured Request -> Schema Validation -> Policy Engine -> Authorization
-    -> Restricted Executor -> Credential Broker -> OpenBao -> Target
-    -> Verification -> Audit
+    subgraph Agents["Domain agents — evidence + proposals only"]
+        Wazuh["Wazuh Agent<br/>alerts, triage (L1/L2)"]
+        Proxmox["Proxmox Agent<br/>infra state, deploy/destroy proposals"]
+        MCP["MCP Gateway<br/>read-only Proxmox queries"]
+    end
 
-There is no direct LLM-to-shell path.
+    HUD <-->|WSS, authenticated| Core
+    Agents -->|"proposals (kind=action)"| Core
+    Core -->|evidence requests, parallel fan-out| Agents
+
+    Wazuh -.->|triage models| LiteLLM["LiteLLM<br/>jarvis-soc-l1 / jarvis-soc-l2"]
+    Core -.-> LiteLLM
+    Proxmox --> MCP
+
+    Human["Human operator"] -->|single-use grant,<br/>typed confirmation for Tier 3| Policy
+```
+
+No agent — not Wazuh, not Proxmox, not the reasoning model itself — has a path to production infrastructure that skips the PolicyEngine. `RestrictedExecutor` is deployed and deliberately disabled: the whole authorization chain (evidence → proposal → policy evaluation → human grant → execution → audit) is live and tested end-to-end, right up to the point of actually changing anything.
+
+## What's real today
+
+See [`STATUS.md`](STATUS.md) for the full, evidence-backed breakdown (every claim there cites a test name, commit, or production check — nothing is asserted without it). Summary:
+
+| Layer | State |
+|---|---|
+| Core API, sessions, deny-by-default auth | ✅ Implemented, tested, in production |
+| Tiered `PolicyEngine` (1/2/3) + single-use human grants | ✅ Implemented, tested |
+| Wazuh Agent (proposal-only, tier-2 containment) | ✅ Implemented, tested |
+| Proxmox Agent (proposal-only, tier-3 infra) | ✅ Implemented, tested |
+| Cross-domain evidence fan-out (parallel, latency-budgeted) | ✅ Implemented, tested |
+| GPU-accelerated local inference (Vulkan/RADV) | 🚧 In progress, unmerged branch |
+| `RestrictedExecutor` (actual write/execute capability) | ⛔ Deployed, deliberately disabled |
+| Infrastructure knowledge (RAG) | 🚧 In progress, unmerged branch |
+| Persistent memory | 📋 Planned, not started |
+
+Rows marked "tested" (without "in production") are backed by passing tests and a merged commit, but have not yet been confirmed running in the live deployment — see `STATUS.md` for the exact production-vs-test evidence split.
+
+## Design principles
+
+- **One brain, many evidence sources.** Only Core's `ConversationService` forms verdicts and decides routing. Every domain agent — Wazuh, Proxmox, and whatever comes next — exposes read tools and a declared set of *proposable* capabilities. None of them reason independently or call a model on their own outside Core's governed path.
+- **Capability tiers, not one-size-fits-all authorization.** Reading is free. Reversible containment (blocking an IP, isolating a host) needs one human and a 5-minute single-use grant. Creating or destroying infrastructure needs a typed confirmation of the exact resource name, a mandatory rollback plan, and a 2-minute window.
+- **Deny-by-default, fail-closed everywhere.** Unknown capability → denied. Expired grant → denied. Executor disabled → denied. The safe outcome is always the default, never an opt-in.
+- **Documentation is evidence, not aspiration.** Nothing in this repo's docs describes a feature as done unless it's backed by a merged commit and a passing test — see [`STATUS.md`](STATUS.md) and the [ADR log](docs/adr/) for the audit trail.
 
 ## Development
 
@@ -47,9 +82,7 @@ Web UI requirements: Node.js/npm.
     npm run build
     npm run dev
 
-The generated `dist/` is a static Web UI. It reads aggregate same-origin Core health without Tauri. After exchanging an existing operator access key for a bounded HttpOnly session, it can use authenticated commands, realtime telemetry, security alerts and voice without exposing service credentials to JavaScript.
-
-For local browser development, an optional `JARVIS_CORE_URL` configures Vite to proxy only `/v1/health`. It is not included in the browser bundle. Protected routes are deliberately not proxied by the development server.
+The generated `dist/` is a static Web UI, served same-origin behind Nginx. After exchanging an operator access key for a bounded HttpOnly session, it uses authenticated commands, realtime telemetry, security alerts, and voice — without ever exposing service credentials to JavaScript.
 
 The transitional Tauri client additionally requires Rust and native Tauri dependencies:
 
@@ -57,6 +90,12 @@ The transitional Tauri client additionally requires Rust and native Tauri depend
     cargo test --manifest-path src-tauri/Cargo.toml
     npm run tauri dev
 
-See [architecture](docs/architecture.md), [security policy](SECURITY.md), and [roadmap](docs/roadmap.md).
+## Learn more
 
-Operational observability is normalized by the server-side [Telemetry Service](docs/telemetry.md); browsers never query Prometheus or Wazuh directly.
+- [Architecture](docs/architecture.md) — full system diagram and trust boundary
+- [ADR log](docs/adr/) — every architectural decision, with acceptance status and evidence
+- [Roadmap](docs/roadmap.md)
+- [Security policy](SECURITY.md)
+- [`STATUS.md`](STATUS.md) — the single source of truth for what's actually implemented, tested, or pending
+
+There is no direct LLM-to-shell path, anywhere in this system.
