@@ -56,9 +56,10 @@ production audit records and are not represented as such.
 - `feature/voice-latency-instrumentation` is not merged. It contains the GPU
   passthrough fix and voice-latency instrumentation. Audit and merge belong to
   a separate stage.
-- `feature/qdrant-infra-rag` is not merged. The historical
-  `ADR-013` / `ADR-014-prometheus-live-agent-context.md` conflict remains
-  unresolved and must not be resolved in this documentation stage.
+- `feature/qdrant-infra-rag` is not merged. Its ADR-013 RAG decision has been
+  reconciled with the multi-agent architecture; the obsolete, conflicting
+  `ADR-014-prometheus-live-agent-context.md` direct-rendering path was dropped.
+  Expanded indexing and parallel static/live evidence remain separate work.
 - The `apps/desktop` Agent Matrix still exposes the older categories `VOICE
   ENGINE`, `N8N`, `SECURITY AGENT` and `MCP GATEWAY`; it does not represent the
   Wazuh Agent and Proxmox Agent roster. HUD work belongs to a separate stage.

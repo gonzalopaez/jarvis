@@ -8,6 +8,8 @@ mod events;
 mod executor;
 mod gateway;
 mod policy;
+#[cfg(feature = "network-server")]
+mod rag;
 mod routing;
 #[cfg(feature = "network-server")]
 mod security;
@@ -41,6 +43,8 @@ pub use events::{
 pub use executor::{ExecutionResult, RestrictedExecutor};
 pub use gateway::CoreGateway;
 pub use policy::{AuthorizationError, Decision, PolicyEngine, Risk, Rule};
+#[cfg(feature = "network-server")]
+pub use rag::{KnowledgeClient, KnowledgeConfig, KnowledgeError};
 pub use routing::{
     AiMode, CapabilityRequest, CapabilityRoute, CapabilityRouter, Complexity,
     DeterministicCapabilityRouter, RequestSource, RoutingDecision,
