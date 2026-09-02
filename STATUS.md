@@ -19,6 +19,23 @@ none is asserted.
 | LiteLLM conversation aliases | `jarvis-fast` and `jarvis-reasoning` returned responses after the recorded LiteLLM restart | LiteLLM control-plane commits contained by `a2f37e0`; no retained `audit_id` |
 | n8n SOC workflow | Active `SOC 2.0` executions `2333` and `2338` completed; `ACTION_ENABLED=false` | ADR-012 artifacts contained by `a2f37e0`; production execution IDs are n8n IDs, not Core `audit_id`s |
 
+## Production incidents
+
+### Prometheus CT127 disk exhaustion — resolved 2026-09-01
+
+| Field | Evidence |
+|---|---|
+| Failure began | Prometheus journal first recorded `no space left on device` during TSDB head compaction on 2026-08-30 at 20:00:04 -03 |
+| Detection | Detected on 2026-09-01 through the Server Central HUD remaining at `--`; CT127 had entered a restart loop with more than 1,500 attempts |
+| Root cause | The 4 GB root filesystem had no compaction margin. The configured `7d` / `2GB` block retention does not include the WAL, head chunks, operating system or temporary compaction space; the uncompactable WAL reached 2.73 GB |
+| Backup | The stopped TSDB was archived before recovery as `prometheus-tsdb-20260901T212640-0300.tar.zst`; SHA256 `e86dabb817dbeaa2c31fef5d8d069826bdebb8c5afb3766bd36f95ccbc62bde2` |
+| Resolution | CT127 rootfs was expanded from 4 GB to 16 GB at 2026-09-01 21:27 -03. No TSDB or WAL data was deleted. Prometheus returned healthy with zero restarts and all 13 Server Central queries returned one valid result from CT124 |
+| Prevention | Preserve the explicit `--storage.tsdb.retention.size=2GB` limit with sufficient filesystem headroom and alert when CT127 root free space remains below 15% for 10 minutes |
+
+Visual confirmation of the recovered values in the operator's actual HUD is
+still required; HTTP, PromQL and Core-to-Prometheus verification do not replace
+that check.
+
 ## Implemented and validated only by tests
 
 | Capability | Evidence | Commit/merge |
@@ -72,9 +89,12 @@ production audit records and are not represented as such.
 - `feature/qdrant-infra-rag` is not merged. The historical
   `ADR-013` / `ADR-014-prometheus-live-agent-context.md` conflict remains
   unresolved and must not be resolved in this documentation stage.
-- The `apps/desktop` Agent Matrix still exposes the older categories `VOICE
-  ENGINE`, `N8N`, `SECURITY AGENT` and `MCP GATEWAY`; it does not represent the
-  Wazuh Agent and Proxmox Agent roster. HUD work belongs to a separate stage.
+- The `apps/desktop` Agent Matrix now shows the real roster (Voice Service,
+  MCP Gateway, n8n, Wazuh Agent, Proxmox Agent) with live polling for
+  Voice/MCP/n8n and a permanent `NOT INSTRUMENTED` state for Proxmox Agent
+  (`feature/hud-real-agent-roster`, merged 2026-09-02). This closes repository
+  and test evidence; the corresponding production build/deploy to Nginx and
+  operator visual confirmation are still pending as of this merge.
 - Production access used by Claude Code is an unrestricted Proxmox root SSH
   key, not a technically read-only credential. Define graduated credentials:
   a read-only Proxmox API token for diagnostics and root SSH reserved for
