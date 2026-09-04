@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 
 use jarvis_core::{
-    AiVerdict, AnalysisLevel, EventEnvelope, RiskLevel, SocAssessment, SocCaseStore,
+    AiVerdict, AnalysisLevel, AnalystVerdict, EventEnvelope, RiskLevel, SocAssessment, SocCaseStore,
 };
 use serde_json::json;
 use std::sync::OnceLock;
@@ -139,7 +139,16 @@ async fn nonprod_guard_and_canonical_alert_persist() {
     assert_eq!(occurred, "2026-09-04T12:00:00Z");
     let ids: Vec<String> = row.get(1);
     assert_eq!(ids, vec!["INT-MITRE-1"]);
-    assert_eq!(row.get::<_, serde_json::Value>(2)[0]["id"], "T1078");
+    let mitre = row.get::<_, serde_json::Value>(2);
+    assert_eq!(
+        mitre
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["T1078", "T1059.001", "T1105"]
+    );
 }
 
 #[tokio::test]
@@ -227,6 +236,19 @@ async fn assessments_are_append_only_and_projection_is_latest() {
         ))
         .await
         .unwrap();
+    store
+        .record_analyst_verdict(
+            case_id,
+            Some(_l2),
+            Some(AnalystVerdict::Pending),
+            AnalystVerdict::FalsePositive,
+            "known exception",
+            "synthetic analyst review",
+            "analyst-synthetic",
+            "req-synthetic",
+        )
+        .await
+        .unwrap();
     assert_eq!(
         db.query_one(
             "SELECT count(*) FROM soc_assessments WHERE case_id=$1",
@@ -247,6 +269,26 @@ async fn assessments_are_append_only_and_projection_is_latest() {
     assert_eq!(row.get::<_, i16>(0), 94);
     assert_eq!(row.get::<_, i16>(1), 93);
     assert_eq!(row.get::<_, String>(2), "TRUE_POSITIVE");
+    assert_eq!(
+        db.query_one(
+            "SELECT analyst_verdict FROM soc_cases WHERE id=$1",
+            &[&case_id]
+        )
+        .await
+        .unwrap()
+        .get::<_, String>(0),
+        "FALSE_POSITIVE"
+    );
+    assert_eq!(
+        db.query_one(
+            "SELECT count(*) FROM soc_feedback WHERE case_id=$1",
+            &[&case_id]
+        )
+        .await
+        .unwrap()
+        .get::<_, i64>(0),
+        1
+    );
 }
 
 #[tokio::test]

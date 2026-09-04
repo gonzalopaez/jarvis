@@ -1,4 +1,4 @@
-use crate::{EventBus, EventEnvelope, SocAssessment};
+use crate::{AnalystVerdict, EventBus, EventEnvelope, SocAssessment};
 use serde_json::Value;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Mutex;
@@ -213,6 +213,32 @@ impl SocCaseStore {
             .await
             .map_err(|_| "SOC assessment commit failed")?;
         Ok(assessment_id)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_analyst_verdict(
+        &self,
+        case_id: i64,
+        assessment_id: Option<i64>,
+        previous: Option<AnalystVerdict>,
+        verdict: AnalystVerdict,
+        reason: &str,
+        notes: &str,
+        analyst: &str,
+        request_id: &str,
+    ) -> Result<i64, &'static str> {
+        let mut client = self.client.lock().await;
+        let tx = client
+            .transaction()
+            .await
+            .map_err(|_| "SOC feedback transaction failed")?;
+        let verdict_text = enum_text(&verdict)?;
+        let previous_text = previous.as_ref().map(enum_text).transpose()?;
+        let row = tx.query_one("INSERT INTO soc_feedback(case_id,assessment_id,previous_analyst_verdict,analyst_verdict,reason,notes,analyst,request_id,ai_verdict_snapshot,ai_confidence_snapshot,risk_score_snapshot) SELECT $1,$2,$3,$4,$5,$6,$7,$8,ai_verdict,confidence_score,risk_score FROM soc_assessments WHERE assessment_id=$2 RETURNING feedback_id", &[&case_id, &assessment_id, &previous_text, &verdict_text, &reason, &notes, &analyst, &request_id]).await.map_err(|_| "feedback insert failed")?;
+        let feedback_id: i64 = row.get(0);
+        if tx.execute("UPDATE soc_cases SET analyst_verdict=$2,analyst_reason=$3,analyst_notes=$4,updated_at=now() WHERE id=$1", &[&case_id, &verdict_text, &reason, &notes]).await.map_err(|_| "analyst projection failed")? != 1 { return Err("feedback case does not exist"); }
+        tx.commit().await.map_err(|_| "feedback commit failed")?;
+        Ok(feedback_id)
     }
 }
 
