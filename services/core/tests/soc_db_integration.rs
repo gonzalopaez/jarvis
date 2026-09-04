@@ -132,7 +132,7 @@ async fn nonprod_guard_and_canonical_alert_persist() {
         .unwrap();
     let event = alert("INT-MITRE-1", 1_756_987_200_000, true);
     let case_id = store.ingest(&event).await.unwrap().expect("case created");
-    let row = db.query_one("SELECT to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), alert_ids, evidence->'wazuh'->'mitre' FROM case_events WHERE case_id=$1", &[&case_id]).await.unwrap();
+    let row = db.query_one("SELECT to_char(e.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), c.alert_ids, e.evidence->'wazuh'->'mitre' FROM case_events e JOIN soc_cases c ON c.id=e.case_id WHERE e.case_id=$1", &[&case_id]).await.unwrap();
     let occurred: String = row.get(0);
     assert_eq!(occurred, "2026-09-04T12:00:00Z");
     let ids: Vec<String> = row.get(1);
@@ -149,6 +149,14 @@ async fn assessments_are_append_only_and_projection_is_latest() {
     let url = test_url();
     let (db, _connection) = probe(&url).await;
     let store = SocCaseStore::connect_test(&url).await.unwrap();
+    db.execute("DELETE FROM soc_feedback", &[]).await.unwrap();
+    db.execute("DELETE FROM soc_assessments", &[])
+        .await
+        .unwrap();
+    db.execute("DELETE FROM case_events WHERE case_id IN (SELECT id FROM soc_cases WHERE case_key='INT-ASSESS')", &[]).await.unwrap();
+    db.execute("DELETE FROM soc_cases WHERE case_key='INT-ASSESS'", &[])
+        .await
+        .unwrap();
     let case_id: i64 = db.query_one("INSERT INTO soc_cases(case_key,severity,priority,title,host,first_seen,last_seen) VALUES ('INT-ASSESS','critical','p2','synthetic','SYN-ASSESS',now(),now()) RETURNING id", &[]).await.unwrap().get(0);
     let l1 = store
         .persist_assessment(&assessment(
