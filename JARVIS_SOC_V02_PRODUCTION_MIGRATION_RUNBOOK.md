@@ -1,6 +1,6 @@
 # JARVIS SOC v0.2 — Production Migration Runbook
 
-Status: BLOCKED pending semantic baseline fingerprint verification (not approved for execution)
+Status: READY_FOR_REVIEW (not approved for execution)
 
 ## Scope and evidence
 
@@ -28,7 +28,7 @@ pct exec 133 -- su - postgres -c "psql -d jarvis_soc -X -Atc \"SELECT pg_size_pr
 pct exec 133 -- su - postgres -c "psql -d jarvis_soc -X -c \"SELECT state,count(*) FROM pg_stat_activity WHERE datname='jarvis_soc' GROUP BY state;\""
 ```
 
-The read-only production fingerprint supplied by the operator is `ba004dd05ecc0bdc8023ef4e7830a65026c4229bb013ae6d3bdd045b97397f5c` over 47 canonical lines. It was serialized as `COLUMN`, `CONSTRAINT`, `INDEX`, pipe-separated, with the specified catalog columns and ordering. The matching fingerprint for the versioned baseline is still **UNVERIFIED**: Proxmox access is currently rejected by the managed environment, and Omarchy is not an approved PostgreSQL runtime. Restore the baseline on temporary Proxmox PostgreSQL 15, run the identical three catalog queries, require exactly 47 lines, and compare SHA-256. Any mismatch blocks the window.
+Operator-provided read-only evidence verifies LIVE CT133 and the versioned baseline: both use the canonical `COLUMN`, `CONSTRAINT`, `INDEX` serialization, exactly 47 lines, and SHA-256 `ba004dd05ecc0bdc8023ef4e7830a65026c4229bb013ae6d3bdd045b97397f5c`. The baseline was restored on PostgreSQL 15.19/Debian 12 in a temporary Proxmox CT. `SCHEMA BASELINE = VERIFIED`; `SCHEMA DRIFT = NONE`; `LIVE SCHEMA FINGERPRINT = VERIFIED`. Evidence was collected by an external operator because Codex SSH is restricted. No CT133 DDL/DML was performed.
 
 ## Preconditions and abort criteria
 
@@ -59,4 +59,8 @@ Read-only checks must confirm one row each for 0001/0002 with the expected check
 
 Because application writes may occur after DDL, rollback is operational: stop the change, keep additive objects, restore CT133/database from the verified backup only under an explicit human decision, and validate Core health. Do not invent a down migration. Preserve sanitized evidence: commit/hash table, pre/post fingerprints, migration history, durations, lock observations, backup/restore IDs, health checks and operator/ticket. Never persist secrets or production case data.
 
-Final gate after the window is `PRODUCTION DDL = APPROVED_FOR_REVIEW` only after the semantic fingerprint matches. Until then: `PRODUCTION MIGRATION RUNBOOK = BLOCKED`. A separate human approval is required for execution; this document authorizes no production command.
+Final gate is `PRODUCTION MIGRATION RUNBOOK = READY_FOR_REVIEW` and `PRODUCTION DDL = NOT APPROVED FOR EXECUTION`. A separate human approval is required for execution; this document authorizes no production command.
+
+## Runner authorization review
+
+`scripts/soc-migrate.sh` has a deliberate fail-closed gate: `JARVIS_ALLOW_SOC_MIGRATIONS=YES`, an explicit `JARVIS_SOC_MIGRATION_DATABASE_URL`, and an exact `JARVIS_SOC_MIGRATION_EXPECTED_DATABASE` match. It also verifies each migration checksum from the selected tree, uses a transaction, advisory lock, 2-second lock timeout and 30-second statement timeout. It does not independently attest CT ID/hostname or schema fingerprint; those remain mandatory external prechecks in this runbook. Therefore `PRODUCTION EXECUTION = BLOCKED` until a human-approved window supplies all prechecks and credentials through the protected mechanism. No runner modification is made in this phase.

@@ -10,6 +10,8 @@ Do not mark ahead of the window. This checklist is operational only; it does not
 - [ ] Pre-migration schema fingerprint matches rehearsal baseline
 - [ ] CT133 canonical fingerprint recorded: `ba004dd05ecc0bdc8023ef4e7830a65026c4229bb013ae6d3bdd045b97397f5c` (47 lines)
 - [ ] Versioned baseline restored on temporary Proxmox PostgreSQL 15 with identical algorithm, exactly 47 lines, and matching SHA-256
+- [x] `SCHEMA BASELINE = VERIFIED`; `SCHEMA DRIFT = NONE`; evidence supplied by external operator
+- [ ] Human production authorization for runner gate (`JARVIS_ALLOW_SOC_MIGRATIONS=YES`)
 - [ ] No unexpected `jarvis_schema_migrations`
 - [ ] Disk space, connections, locks and idle transactions acceptable
 - [ ] Proxmox backup/snapshot completed
