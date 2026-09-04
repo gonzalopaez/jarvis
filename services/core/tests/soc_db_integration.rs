@@ -4,7 +4,10 @@ use jarvis_core::{
     AiVerdict, AnalysisLevel, EventEnvelope, RiskLevel, SocAssessment, SocCaseStore,
 };
 use serde_json::json;
+use std::sync::OnceLock;
 use tokio_postgres::{Client, NoTls};
+
+static TEST_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
 fn test_url() -> String {
     let url = std::env::var("JARVIS_SOC_TEST_DB_URL")
@@ -110,11 +113,19 @@ fn assessment(
 
 #[tokio::test]
 async fn nonprod_guard_and_canonical_alert_persist() {
+    let _guard = TEST_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
     let url = test_url();
     let (db, _connection) = probe(&url).await;
     let store = SocCaseStore::connect_test(&url)
         .await
         .expect("guarded test connection");
+    db.execute("DELETE FROM soc_feedback", &[]).await.unwrap();
+    db.execute("DELETE FROM soc_assessments", &[])
+        .await
+        .unwrap();
     db.execute("DELETE FROM case_events WHERE case_id IN (SELECT id FROM soc_cases WHERE case_key LIKE 'INT-%')", &[]).await.unwrap();
     db.execute("DELETE FROM soc_cases WHERE case_key LIKE 'INT-%'", &[])
         .await
@@ -131,6 +142,10 @@ async fn nonprod_guard_and_canonical_alert_persist() {
 
 #[tokio::test]
 async fn assessments_are_append_only_and_projection_is_latest() {
+    let _guard = TEST_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
     let url = test_url();
     let (db, _connection) = probe(&url).await;
     let store = SocCaseStore::connect_test(&url).await.unwrap();
