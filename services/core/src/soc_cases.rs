@@ -31,6 +31,46 @@ impl SocCaseStore {
         })
     }
 
+    /// Test-only connection path. It is feature-gated and fail-closed against production names.
+    #[cfg(feature = "integration-tests")]
+    pub async fn connect_test(url: &str) -> Result<Self, &'static str> {
+        let parsed: Config = url.parse().map_err(|_| "invalid SOC test database URL")?;
+        let lower = url.to_ascii_lowercase();
+        let db_name = parsed
+            .get_dbname()
+            .ok_or("test database name is required")?;
+        let db_lower = db_name.to_ascii_lowercase();
+        if db_lower == "jarvis_soc"
+            || lower.contains("192.168.1.26")
+            || lower.contains("jarvis-soc-db")
+            || !(db_lower.contains("test")
+                || db_lower.contains("rehearsal")
+                || db_lower.contains("nonprod"))
+        {
+            return Err("refusing non-test SOC database");
+        }
+        let mut config = parsed;
+        config.connect_timeout(Duration::from_secs(4));
+        let (client, connection) = config
+            .connect(NoTls)
+            .await
+            .map_err(|_| "SOC test database unavailable")?;
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let current: String = client
+            .query_one("SELECT current_database()", &[])
+            .await
+            .map_err(|_| "test database probe failed")?
+            .get(0);
+        if current.eq_ignore_ascii_case("jarvis_soc") {
+            return Err("refusing production database");
+        }
+        Ok(Self {
+            client: Arc::new(Mutex::new(client)),
+        })
+    }
+
     pub async fn run_until(
         self,
         events: EventBus,

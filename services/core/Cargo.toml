@@ -7,6 +7,7 @@ publish = false
 
 [features]
 default = []
+integration-tests = []
 network-server = [
   "dep:futures-util",
   "dep:hyper-tungstenite",
