@@ -1,6 +1,6 @@
 # JARVIS SOC v0.2 — Production Migration Runbook
 
-Status: READY_FOR_REVIEW (not approved for execution)
+Status: BLOCKED pending semantic baseline fingerprint verification (not approved for execution)
 
 ## Scope and evidence
 
@@ -28,7 +28,7 @@ pct exec 133 -- su - postgres -c "psql -d jarvis_soc -X -Atc \"SELECT pg_size_pr
 pct exec 133 -- su - postgres -c "psql -d jarvis_soc -X -c \"SELECT state,count(*) FROM pg_stat_activity WHERE datname='jarvis_soc' GROUP BY state;\""
 ```
 
-Compare a schema-only fingerprint (tables, columns, types, nullability, defaults, PK/FK/CHECK and indexes) with the rehearsal fingerprint `a4f80f8566ad9958ad7b4948df4eb32b3c7807e20020f2e4d9b9b558a9e30100`. Any drift blocks the window.
+The read-only production fingerprint supplied by the operator is `ba004dd05ecc0bdc8023ef4e7830a65026c4229bb013ae6d3bdd045b97397f5c` over 47 canonical lines. It was serialized as `COLUMN`, `CONSTRAINT`, `INDEX`, pipe-separated, with the specified catalog columns and ordering. The matching fingerprint for the versioned baseline is still **UNVERIFIED**: Proxmox access is currently rejected by the managed environment, and Omarchy is not an approved PostgreSQL runtime. Restore the baseline on temporary Proxmox PostgreSQL 15, run the identical three catalog queries, require exactly 47 lines, and compare SHA-256. Any mismatch blocks the window.
 
 ## Preconditions and abort criteria
 
@@ -59,4 +59,4 @@ Read-only checks must confirm one row each for 0001/0002 with the expected check
 
 Because application writes may occur after DDL, rollback is operational: stop the change, keep additive objects, restore CT133/database from the verified backup only under an explicit human decision, and validate Core health. Do not invent a down migration. Preserve sanitized evidence: commit/hash table, pre/post fingerprints, migration history, durations, lock observations, backup/restore IDs, health checks and operator/ticket. Never persist secrets or production case data.
 
-Final gate after the window is `PRODUCTION DDL = APPROVED_FOR_REVIEW` only. A separate human approval is required for execution; this document authorizes no production command.
+Final gate after the window is `PRODUCTION DDL = APPROVED_FOR_REVIEW` only after the semantic fingerprint matches. Until then: `PRODUCTION MIGRATION RUNBOOK = BLOCKED`. A separate human approval is required for execution; this document authorizes no production command.

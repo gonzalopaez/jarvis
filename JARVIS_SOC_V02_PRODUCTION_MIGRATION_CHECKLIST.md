@@ -8,6 +8,8 @@ Do not mark ahead of the window. This checklist is operational only; it does not
 - [ ] CT133 and hostname `jarvis-soc-db` verified
 - [ ] PostgreSQL 15 and database `jarvis_soc` verified
 - [ ] Pre-migration schema fingerprint matches rehearsal baseline
+- [ ] CT133 canonical fingerprint recorded: `ba004dd05ecc0bdc8023ef4e7830a65026c4229bb013ae6d3bdd045b97397f5c` (47 lines)
+- [ ] Versioned baseline restored on temporary Proxmox PostgreSQL 15 with identical algorithm, exactly 47 lines, and matching SHA-256
 - [ ] No unexpected `jarvis_schema_migrations`
 - [ ] Disk space, connections, locks and idle transactions acceptable
 - [ ] Proxmox backup/snapshot completed
