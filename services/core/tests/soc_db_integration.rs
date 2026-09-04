@@ -130,7 +130,7 @@ async fn nonprod_guard_and_canonical_alert_persist() {
     db.execute("DELETE FROM soc_cases WHERE case_key LIKE 'INT-%'", &[])
         .await
         .unwrap();
-    let event = alert("INT-MITRE-1", 1_756_987_200_000, true);
+    let event = alert("INT-MITRE-1", 1_788_523_200_000, true);
     let case_id = store.ingest(&event).await.unwrap().expect("case created");
     let row = db.query_one("SELECT to_char(e.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), c.alert_ids, e.evidence->'wazuh'->'mitre' FROM case_events e JOIN soc_cases c ON c.id=e.case_id WHERE e.case_id=$1", &[&case_id]).await.unwrap();
     let occurred: String = row.get(0);
