@@ -149,6 +149,24 @@ impl SocCaseStore {
         &self,
         assessment: &SocAssessment,
     ) -> Result<i64, &'static str> {
+        self.persist_assessment_inner(assessment, false).await
+    }
+
+    #[cfg(feature = "integration-tests")]
+    pub async fn persist_assessment_for_test(
+        &self,
+        assessment: &SocAssessment,
+        fail_after_insert: bool,
+    ) -> Result<i64, &'static str> {
+        self.persist_assessment_inner(assessment, fail_after_insert)
+            .await
+    }
+
+    async fn persist_assessment_inner(
+        &self,
+        assessment: &SocAssessment,
+        fail_after_insert: bool,
+    ) -> Result<i64, &'static str> {
         let mut client = self.client.lock().await;
         let tx = client
             .transaction()
@@ -179,6 +197,9 @@ impl SocCaseStore {
               &assessment.supersedes_assessment_id],
         ).await.map_err(|_| "assessment insert failed")?;
         let assessment_id: i64 = row.get(0);
+        if fail_after_insert {
+            return Err("test-injected assessment failure");
+        }
         let updated = tx.execute(
             "UPDATE soc_cases SET risk_score=$2,risk_level=$3,ai_confidence=$4,ai_verdict=$5,assessment_version=$6,scoring_version=$7,updated_at=now() WHERE id=$1",
             &[&assessment.case_id, &(assessment.risk_score as i16), &risk_level,

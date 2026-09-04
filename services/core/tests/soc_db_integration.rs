@@ -72,6 +72,8 @@ fn alert(id: &str, ts: u64, mitre: bool) -> EventEnvelope {
     }
 }
 
+const BASE_TS: u64 = 1_788_523_200_000;
+
 fn assessment(
     case_id: i64,
     level: AnalysisLevel,
@@ -130,7 +132,7 @@ async fn nonprod_guard_and_canonical_alert_persist() {
     db.execute("DELETE FROM soc_cases WHERE case_key LIKE 'INT-%'", &[])
         .await
         .unwrap();
-    let event = alert("INT-MITRE-1", 1_788_523_200_000, true);
+    let event = alert("INT-MITRE-1", BASE_TS, true);
     let case_id = store.ingest(&event).await.unwrap().expect("case created");
     let row = db.query_one("SELECT to_char(e.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), c.alert_ids, e.evidence->'wazuh'->'mitre' FROM case_events e JOIN soc_cases c ON c.id=e.case_id WHERE e.case_id=$1", &[&case_id]).await.unwrap();
     let occurred: String = row.get(0);
@@ -138,6 +140,51 @@ async fn nonprod_guard_and_canonical_alert_persist() {
     let ids: Vec<String> = row.get(1);
     assert_eq!(ids, vec!["INT-MITRE-1"]);
     assert_eq!(row.get::<_, serde_json::Value>(2)[0]["id"], "T1078");
+}
+
+#[tokio::test]
+async fn legacy_dedup_and_thirty_minute_grouping_work_on_new_schema() {
+    let _guard = TEST_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    let url = test_url();
+    let (db, _connection) = probe(&url).await;
+    let store = SocCaseStore::connect_test(&url).await.unwrap();
+    db.execute("DELETE FROM soc_feedback", &[]).await.unwrap();
+    db.execute("DELETE FROM soc_assessments", &[])
+        .await
+        .unwrap();
+    db.execute("DELETE FROM case_events WHERE case_id IN (SELECT id FROM soc_cases WHERE host='SYN-INTEGRATION-01')", &[]).await.unwrap();
+    db.execute("DELETE FROM soc_cases WHERE host='SYN-INTEGRATION-01'", &[])
+        .await
+        .unwrap();
+    let first = alert("INT-GROUP-1", BASE_TS, false);
+    let first_id = store.ingest(&first).await.unwrap().unwrap();
+    assert_eq!(store.ingest(&first).await.unwrap(), Some(first_id));
+    assert_eq!(
+        store
+            .ingest(&alert("INT-GROUP-2", BASE_TS + 5 * 60_000, false))
+            .await
+            .unwrap(),
+        Some(first_id)
+    );
+    let outside = store
+        .ingest(&alert("INT-GROUP-3", BASE_TS + 36 * 60_000, false))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(outside, first_id);
+    assert_eq!(
+        db.query_one(
+            "SELECT count(*) FROM case_events WHERE case_id=$1",
+            &[&first_id]
+        )
+        .await
+        .unwrap()
+        .get::<_, i64>(0),
+        2
+    );
 }
 
 #[tokio::test]
@@ -200,4 +247,55 @@ async fn assessments_are_append_only_and_projection_is_latest() {
     assert_eq!(row.get::<_, i16>(0), 94);
     assert_eq!(row.get::<_, i16>(1), 93);
     assert_eq!(row.get::<_, String>(2), "TRUE_POSITIVE");
+}
+
+#[tokio::test]
+async fn assessment_insert_failure_rolls_back_without_projection() {
+    let _guard = TEST_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    let url = test_url();
+    let (db, _connection) = probe(&url).await;
+    let store = SocCaseStore::connect_test(&url).await.unwrap();
+    db.execute("DELETE FROM soc_feedback", &[]).await.unwrap();
+    db.execute("DELETE FROM soc_assessments", &[])
+        .await
+        .unwrap();
+    db.execute("DELETE FROM case_events WHERE case_id IN (SELECT id FROM soc_cases WHERE case_key='INT-ROLLBACK')", &[]).await.unwrap();
+    db.execute("DELETE FROM soc_cases WHERE case_key='INT-ROLLBACK'", &[])
+        .await
+        .unwrap();
+    let case_id: i64 = db.query_one("INSERT INTO soc_cases(case_key,severity,priority,title,host,first_seen,last_seen) VALUES ('INT-ROLLBACK','high','p2','synthetic','SYN-ROLLBACK',now(),now()) RETURNING id", &[]).await.unwrap().get(0);
+    assert!(store
+        .persist_assessment_for_test(
+            &assessment(
+                case_id,
+                AnalysisLevel::L1,
+                81,
+                63,
+                AiVerdict::Suspicious,
+                None
+            ),
+            true
+        )
+        .await
+        .is_err());
+    assert_eq!(
+        db.query_one(
+            "SELECT count(*) FROM soc_assessments WHERE case_id=$1",
+            &[&case_id]
+        )
+        .await
+        .unwrap()
+        .get::<_, i64>(0),
+        0
+    );
+    assert_eq!(
+        db.query_one("SELECT risk_score FROM soc_cases WHERE id=$1", &[&case_id])
+            .await
+            .unwrap()
+            .get::<_, Option<i16>>(0),
+        None
+    );
 }
