@@ -6,4 +6,4 @@ The operation starts one PostgreSQL transaction, inserts an immutable row into `
 
 AI and analyst verdict domains remain separate. This method does not write analyst feedback, emit 90/90 notifications, invoke voice, or request Tier 2.
 
-Compilation, formatting, unit tests and Clippy pass. PostgreSQL integration is **UNVERIFIED** because migrations could not be executed through the exact runner in the temporary environment. In particular, L1/L2 row retention, projection rollback and SQL parameter compatibility must be exercised before deployment.
+Compilation, formatting, unit tests and Clippy pass. Migration tables and constraints were validated in PostgreSQL 15 NONPROD. Runtime PostgreSQL integration is **UNVERIFIED** because CT134 intentionally has no Rust toolchain and no Core binary was deployed there; L1/L2 retention and projection rollback remain required.

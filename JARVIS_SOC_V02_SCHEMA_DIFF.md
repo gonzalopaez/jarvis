@@ -1,6 +1,6 @@
 # SOC v0.2 Schema Diff
 
-This is the reviewed logical diff between the verified CT133 baseline and migration 0002. It is **not** a post-execution fingerprint because the exact rehearsal execution was blocked.
+This is the reviewed diff between the verified CT133 baseline and migration 0002, validated against PostgreSQL 15 rehearsal databases A/B from the published commit.
 
 | CHANGE | CLASS | COMPATIBILITY | RISK |
 |---|---|---|---|
@@ -12,4 +12,4 @@ This is the reviewed logical diff between the verified CT133 baseline and migrat
 
 No reviewed statement contains `DROP`, destructive `RENAME`, type narrowing, backfill, or deletion. Existing `soc_cases.priority`, `confidence`, `mitre_techniques`, `assigned_to`, `alert_ids` and all other baseline columns are untouched.
 
-Final schema fingerprint A/B: **UNVERIFIED**. Migration durations and observed lock waits: **UNVERIFIED**.
+Canonical post-migration A/B fingerprint (excluding random pg_dump guard lines): `a4f80f8566ad9958ad7b4948df4eb32b3c7807e20020f2e4d9b9b558a9e30100` for both databases. No DROP, destructive rename, type narrowing or legacy constraint removal was observed. 0002 completed in approximately 0.55 s on these small databases; lock timeout occurred at approximately 2.55 s.

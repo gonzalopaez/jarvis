@@ -9,7 +9,7 @@ The SQL is additive: all new `soc_cases` columns are nullable without defaults, 
 | COMBINATION | RESULT | REASON |
 |---|---|---|
 | Old Core + baseline DB | baseline code tests PASS; DB behavioral rehearsal incomplete | baseline schema restored, but synthetic legacy operations were not completed |
-| Old Core + new DB | UNVERIFIED | 0001/0002 exact runner execution was blocked |
+| Old Core + new DB | UNVERIFIED | migrations pass; CT134 has no Rust/toolchain harness |
 | New Core + new DB | UNVERIFIED | migrated database was unavailable to the local test binary |
 
-Production gate remains blocked until both runtime combinations pass against a PostgreSQL 15 rehearsal database.
+Schema-level compatibility passes: legacy columns/constraints survived and synthetic legacy rows were accepted. Runtime gate remains blocked until both combinations pass with an executable Core harness.

@@ -2,18 +2,18 @@
 
 | GATE | RESULT |
 |---|---|
-| MIGRATIONS | BLOCKED |
+| MIGRATIONS | PASS (NONPROD) |
 | OLD CORE + NEW DB | FAIL (not demonstrated) |
 | NEW CORE + NEW DB | FAIL (not demonstrated) |
-| MITRE END-TO-END | PASS at adapter/canonical structural tests; DB path UNVERIFIED |
+| MITRE END-TO-END | FAIL (not demonstrated through Core DB path) |
 | RISK ENGINE | PASS |
 | CONFIDENCE ENGINE | PASS |
-| ASSESSMENT PERSISTENCE | FAIL (compiled, DB integration not demonstrated) |
+| ASSESSMENT PERSISTENCE | FAIL (DB runtime not exercised) |
 | PRODUCTION DDL | BLOCKED |
 
 ## Why
 
-PostgreSQL 15 baseline restoration succeeded, but the exact runner, migration bytes and database integration tests could not traverse the managed environment's SSH transfer/tunnel restriction. Absence of evidence is not treated as success.
+PostgreSQL 15 baseline restoration and exact-byte runner execution succeeded inside CT134. Core runtime integration remains unverified because production Core was correctly not deployed and CT134 lacks a Rust toolchain. Absence of evidence is not treated as success.
 
 ## Required review sequence
 
