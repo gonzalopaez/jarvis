@@ -128,8 +128,8 @@ async fn nonprod_guard_and_canonical_alert_persist() {
     db.execute("DELETE FROM soc_assessments", &[])
         .await
         .unwrap();
-    db.execute("DELETE FROM case_events WHERE case_id IN (SELECT id FROM soc_cases WHERE case_key LIKE 'INT-%')", &[]).await.unwrap();
-    db.execute("DELETE FROM soc_cases WHERE case_key LIKE 'INT-%'", &[])
+    db.execute("DELETE FROM case_events WHERE case_id IN (SELECT id FROM soc_cases WHERE host='SYN-INTEGRATION-01')", &[]).await.unwrap();
+    db.execute("DELETE FROM soc_cases WHERE host='SYN-INTEGRATION-01'", &[])
         .await
         .unwrap();
     let event = alert("INT-MITRE-1", BASE_TS, true);
