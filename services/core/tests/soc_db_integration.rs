@@ -341,3 +341,62 @@ async fn assessment_insert_failure_rolls_back_without_projection() {
         None
     );
 }
+
+#[tokio::test]
+async fn malformed_alert_identifiers_remain_absent() {
+    let _guard = TEST_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    let url = test_url();
+    let (db, _connection) = probe(&url).await;
+    let store = SocCaseStore::connect_test(&url).await.unwrap();
+    let event = EventEnvelope {
+        event_version: "1",
+        event_id: "synthetic-null".into(),
+        event_type: "security.alert",
+        timestamp_ms: BASE_TS,
+        correlation_id: None,
+        payload: json!({"host":"SYN-NULL","severity":"high","title":"Synthetic incomplete","timestamp_ms":BASE_TS}),
+    };
+    assert_eq!(store.ingest(&event).await.unwrap(), None);
+    assert_eq!(
+        db.query_one("SELECT count(*) FROM soc_cases WHERE host='SYN-NULL'", &[])
+            .await
+            .unwrap()
+            .get::<_, i64>(0),
+        0
+    );
+}
+
+#[tokio::test]
+async fn assessment_insert_constraint_failure_does_not_change_projection() {
+    let _guard = TEST_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    let url = test_url();
+    let (db, _connection) = probe(&url).await;
+    let store = SocCaseStore::connect_test(&url).await.unwrap();
+    assert!(store
+        .persist_assessment(&assessment(
+            9_999_999,
+            AnalysisLevel::L1,
+            50,
+            50,
+            AiVerdict::Suspicious,
+            None
+        ))
+        .await
+        .is_err());
+    assert_eq!(
+        db.query_one(
+            "SELECT count(*) FROM soc_assessments WHERE case_id=9999999",
+            &[]
+        )
+        .await
+        .unwrap()
+        .get::<_, i64>(0),
+        0
+    );
+}
