@@ -14,6 +14,9 @@ mod routing;
 #[cfg(feature = "network-server")]
 mod security;
 mod session;
+mod soc;
+#[cfg(feature = "network-server")]
+mod soc_cases;
 mod telemetry;
 mod transport;
 mod validation;
@@ -55,6 +58,15 @@ pub use session::{
     IssuedSession, SessionConfigError, SessionIssueError, SessionStore, DEFAULT_MAX_SESSIONS,
     DEFAULT_SESSION_TTL, MAX_SESSIONS, SESSION_COOKIE_NAME,
 };
+pub use soc::{
+    calculate_confidence, calculate_final_priority, calculate_risk, count_independent_sources,
+    is_critical_candidate, AiVerdict, AnalysisLevel, AnalystVerdict, CanonicalWazuhEvent,
+    ConfidenceFactor, ConfidenceInput, ConfidenceResult, EvidenceSource, MitreReference,
+    RiskFactor, RiskInput, RiskLevel, RiskResult, SocAssessment, SocPriority, WazuhAgentIdentity,
+    WazuhDecoder, WazuhEntities, WazuhHash, WazuhRule, CONFIDENCE_VERSION, RISK_SCORING_VERSION,
+};
+#[cfg(feature = "network-server")]
+pub use soc_cases::SocCaseStore;
 #[cfg(feature = "network-server")]
 pub use telemetry::{run_prometheus_availability_until, PrometheusTelemetryAdapter};
 pub use telemetry::{

@@ -19,13 +19,17 @@ struct RelayResponse {
 
 #[derive(Debug, Deserialize)]
 struct Alert {
-    id: String,
+    id: Option<String>,
     #[serde(default)]
-    host: String,
-    timestamp_ms: u64,
+    host: Option<String>,
+    timestamp_ms: Option<u64>,
     severity: String,
-    title: String,
-    description: String,
+    title: Option<String>,
+    description: Option<String>,
+    #[serde(default)]
+    source_ip: Option<String>,
+    #[serde(default)]
+    wazuh: Option<serde_json::Value>,
 }
 
 impl WazuhSecurityPoller {
@@ -100,7 +104,8 @@ impl WazuhSecurityPoller {
                 json!({
                     "id": alert.id, "host": alert.host, "timestamp_ms": alert.timestamp_ms,
                     "severity": alert.severity, "title": alert.title,
-                    "description": alert.description
+                    "description": alert.description, "source_ip": alert.source_ip,
+                    "wazuh": alert.wazuh
                 }),
             );
         }

@@ -16,6 +16,7 @@ network-server = [
   "tokio/net",
   "tokio/signal",
   "dep:reqwest",
+  "dep:tokio-postgres",
 ]
 
 [[bin]]
@@ -33,6 +34,7 @@ hyper-util = "0.1"
 futures-util = { version = "0.3", optional = true }
 hyper-tungstenite = { version = "0.30", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"], optional = true }
 hex = "0.4"
 getrandom = "0.4"
 serde = { version = "1", features = ["derive"] }

@@ -1,0 +1,1 @@
+{"id":"J-001","timestamp":"2026-01-01T10:00:00Z","agent":{"id":"110","name":"host-j"},"rule":{"id":"5010","level":10,"description":"Synthetic contradictory evidence"},"data":{"srcuser":"approved-user"}}

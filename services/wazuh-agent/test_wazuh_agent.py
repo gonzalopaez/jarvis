@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from wazuh_agent import AgentConfig, AlertStore, LLM_TIMEOUT_SECONDS, MAX_CONTEXT_BYTES, WazuhAgent, mcp_loop
+from wazuh_agent import AgentConfig, AlertStore, LLM_TIMEOUT_SECONDS, MAX_CONTEXT_BYTES, WazuhAgent, mcp_loop, normalize_alert
 
 
 class FakeHttp:
@@ -48,6 +48,29 @@ class WazuhAgentTests(unittest.TestCase):
         alerts = AlertStore(self.config.alerts_path).read()
         self.assertEqual(alerts[0]["host"], "host-01")
         self.assertEqual(alerts[0]["severity"], "critical")
+
+    def test_canonical_event_preserves_mitre_and_original_timestamp(self):
+        fixture = json.loads((Path(__file__).parent / "fixtures/mitre_chain.json").read_text())
+        event = normalize_alert(fixture)["wazuh"]
+        self.assertEqual(event["timestamp"], "2026-01-01T10:06:00Z")
+        self.assertEqual(event["timestamp_ms"], 1767261960000)
+        self.assertEqual([item["id"] for item in event["mitre"]], ["T1078", "T1059.001", "T1105"])
+        self.assertEqual(event["entities"]["src_user"], "test-user")
+        self.assertIsNone(event["entities"]["dst_user"])
+
+    def test_incomplete_event_does_not_invent_identifiers_or_host(self):
+        fixture = json.loads((Path(__file__).parent / "fixtures/incomplete_alert.json").read_text())
+        normalized = normalize_alert(fixture)
+        self.assertIsNone(normalized["id"])
+        self.assertIsNone(normalized["agent_id"])
+        self.assertIsNone(normalized["host"])
+        self.assertIsNone(normalized["timestamp"])
+        self.assertIsNone(normalized["wazuh"]["mitre"])
+
+    def test_mitre_arrays_do_not_fabricate_missing_labels(self):
+        fixture = json.loads((Path(__file__).parent / "fixtures/mitre_multiple_arrays.json").read_text())
+        mitre = normalize_alert(fixture)["wazuh"]["mitre"]
+        self.assertEqual(mitre[1], {"id": "T1105", "tactic": None, "technique": "Ingress Tool Transfer"})
 
     def test_l2_triage_has_explicit_timeout_and_bounded_context(self):
         verdict = {"verdict": "AMENAZA_REAL_ALTA", "confidence": "ALTA", "justification": "evidence", "proposed_actions": []}

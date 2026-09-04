@@ -1,0 +1,1 @@
+{"id":"C-001","timestamp":"2026-01-01T10:06:00Z","agent":{"id":"103","name":"host-c"},"rule":{"id":"5003","level":13,"description":"Synthetic chain","mitre":{"id":["T1078","T1059.001","T1105"],"tactic":["Initial Access","Execution","Command and Control"],"technique":["Valid Accounts","PowerShell","Ingress Tool Transfer"]}},"data":{"srcuser":"test-user","srcip":"198.51.100.10"}}

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -69,27 +70,124 @@ class AgentConfig:
 def normalize_alert(raw: dict[str, Any]) -> dict[str, Any]:
     rule = raw.get("rule") if isinstance(raw.get("rule"), dict) else {}
     agent = raw.get("agent") if isinstance(raw.get("agent"), dict) else {}
-    level = int(rule.get("level") or 0)
-    severity = "critical" if level >= 12 else "high" if level >= 10 else "medium" if level >= 7 else "low"
-    host = str(agent.get("name") or agent.get("hostname") or raw.get("hostname") or "unknown")[:128]
+    raw_level = rule.get("level")
+    level = int(raw_level) if raw_level is not None else None
+    severity_level = level or 0
+    severity = "critical" if severity_level >= 12 else "high" if severity_level >= 10 else "medium" if severity_level >= 7 else "low"
+    host = _optional_text(agent.get("name") or agent.get("hostname") or raw.get("hostname"), 128)
     full_log = str(raw.get("full_log") or "")
     data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
-    source_ip = str(data.get("srcip") or data.get("src_ip") or "")[:45]
-    user = str(data.get("dstuser") or data.get("srcuser") or data.get("user") or "")[:128]
+    source_ip = _optional_text(data.get("srcip") or data.get("src_ip"), 45)
+    src_user = _optional_text(data.get("srcuser"), 128)
+    dst_user = _optional_text(data.get("dstuser"), 128)
+    user = dst_user or src_user or _optional_text(data.get("user"), 128)
+    timestamp = _optional_text(raw.get("timestamp"), 128)
+    timestamp_ms = _timestamp_ms(timestamp)
+    mitre = _normalize_mitre(rule.get("mitre"))
+    alert_id = _optional_text(raw.get("id"), 128)
+    description = _optional_text(full_log or rule.get("description"), 2000)
+    rule_description = _optional_text(rule.get("description"), 160)
+    canonical = {
+        "schema_version": "wazuh.normalized.v1",
+        "source": "wazuh",
+        "alert_id": alert_id,
+        "timestamp": timestamp,
+        "timestamp_ms": timestamp_ms,
+        "received_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "agent": {"id": _optional_text(agent.get("id"), 128), "name": host},
+        "rule": {
+            "id": _optional_text(rule.get("id"), 128), "level": level, "description": rule_description,
+            "groups": _optional_list(rule.get("groups"), 64, 128), "frequency": _optional_int(rule.get("frequency")),
+        },
+        "mitre": mitre,
+        "entities": {
+            "host": host, "src_user": src_user, "dst_user": dst_user, "user": user,
+            "src_ip": source_ip, "dst_ip": _optional_text(data.get("dstip") or data.get("dst_ip"), 45),
+            "process": _optional_text(data.get("process") or data.get("process_name"), 256),
+            "parent_process": _optional_text(data.get("parent_process"), 256),
+            "command_line": _optional_text(data.get("command_line") or data.get("commandLine"), 2000),
+            "file": _optional_text(data.get("file") or data.get("path"), 512),
+            "hash": _normalize_hash(data),
+        },
+        "decoder": _normalize_decoder(raw.get("decoder")),
+        "location": _optional_text(raw.get("location"), 512),
+        "raw_reference": {"source": "wazuh-alerts-json", "alert_id": alert_id},
+    }
     return {
-        "id": str(raw.get("id") or full_log[:32] or uuid.uuid4().hex)[:128],
+        "id": alert_id,
         "host": host,
-        "agent_id": str(agent.get("id") or "000")[:128],
-        "timestamp": str(raw.get("timestamp") or "")[:128],
-        "timestamp_ms": int(time.time() * 1000),
+        "agent_id": canonical["agent"]["id"],
+        "timestamp": timestamp,
+        "timestamp_ms": timestamp_ms,
         "severity": severity,
         "level": level,
-        "rule_id": str(rule.get("id") or "")[:128],
-        "title": str(rule.get("description") or "Wazuh alert")[:160],
-        "description": (full_log or str(rule.get("description") or "Security event"))[:2000],
+        "rule_id": canonical["rule"]["id"],
+        "title": rule_description,
+        "description": description,
         "user": user,
         "source_ip": source_ip,
+        "wazuh": canonical,
     }
+
+
+def _optional_text(value: Any, maximum: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text[:maximum] if text else None
+
+
+def _optional_list(value: Any, maximum_items: int, maximum_text: int) -> list[str] | None:
+    if value is None:
+        return None
+    values = value if isinstance(value, list) else [value]
+    return [text for item in values[:maximum_items] if (text := _optional_text(item, maximum_text))]
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _timestamp_ms(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return int(parsed.timestamp() * 1000)
+    except ValueError:
+        return None
+
+
+def _normalize_mitre(value: Any) -> list[dict[str, str | None]] | None:
+    if value is None or not isinstance(value, dict):
+        return None
+    ids = _optional_list(value.get("id"), 32, 32)
+    if ids is None:
+        return None
+    tactics = _optional_list(value.get("tactic"), 32, 128) or []
+    techniques = _optional_list(value.get("technique"), 32, 128) or []
+    return [{"id": mitre_id, "tactic": tactics[index] if index < len(tactics) else None,
+             "technique": techniques[index] if index < len(techniques) else None}
+            for index, mitre_id in enumerate(ids)]
+
+
+def _normalize_hash(data: dict[str, Any]) -> dict[str, str | None] | None:
+    for algorithm, names in (("sha256", ("sha256", "hash_sha256")), ("sha1", ("sha1", "hash_sha1")), ("md5", ("md5", "hash_md5"))):
+        for name in names:
+            if value := _optional_text(data.get(name), 256):
+                return {"algorithm": algorithm, "value": value}
+    if value := _optional_text(data.get("hash"), 256):
+        return {"algorithm": None, "value": value}
+    return None
+
+
+def _normalize_decoder(value: Any) -> dict[str, str | None] | None:
+    if not isinstance(value, dict):
+        return None
+    return {"name": _optional_text(value.get("name"), 128), "parent": _optional_text(value.get("parent"), 128)}
 
 
 class AlertStore:
@@ -121,7 +219,7 @@ class AlertStore:
             return sum(
                 1
                 for item in alerts
-                if any(word in f'{item["title"]} {item["description"]}'.lower() for word in words)
+                if any(word in f'{item.get("title") or ""} {item.get("description") or ""}'.lower() for word in words)
             )
 
         return {
@@ -168,7 +266,7 @@ class WazuhAgent:
         context = json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
         if len(context.encode()) > MAX_CONTEXT_BYTES:
             raise ValueError("alert context exceeds 12 KiB")
-        alias = "jarvis-soc-l2" if normalized["level"] >= 12 else "jarvis-soc-l1"
+        alias = "jarvis-soc-l2" if (normalized["level"] or 0) >= 12 else "jarvis-soc-l1"
         schema = json.loads(Path(self.config.verdict_schema_path).read_text(encoding="utf-8"))
         payload = {
             "model": alias,
