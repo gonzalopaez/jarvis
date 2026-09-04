@@ -25,7 +25,15 @@ Proxmox checked out `733e5e1a53aaf8b8660371d4cac524ece161ab23` detached and clea
 
 Baseline restoration succeeded in databases A/B. The exact runner applied 0001/0002 to both; complete rerun was a safe NOOP. Checksum mutation was rejected with exit 3. Deliberately invalid `9999_test_failure.sql` returned exit 3 and recorded zero success rows. A conflict lock caused `lock_timeout` at approximately 2.55 s with no partial schema; after release, migration completed in approximately 0.54 s. Canonical schema fingerprints A/B matched after removing only random pg_dump `\\restrict` guards: `a4f80f8566ad9958ad7b4948df4eb32b3c7807e20020f2e4d9b9b558a9e30100`.
 
-## Blocking condition
+## Fase 1.6 database integration gate
+
+Source checkout: branch `feature/qdrant-infra-rag`, commit `650afb5` (descendant of the approved SOC checkpoint). Integration ran entirely inside temporary Proxmox CT134 (`jarvis-soc-integration-nonprod`, PostgreSQL 15.19) using database `jarvis_soc_integration_nonprod`; CT133 and CT124 were not used. The guarded command required `JARVIS_SOC_TEST_DB_URL` and rejects the production address, hostname, and database name.
+
+`cargo test -p jarvis-core --features network-server,integration-tests --test soc_db_integration`: **6/6 PASS**. Evidence included fixed timestamp `2026-09-04T12:00:00Z`, MITRE `T1078`, `T1059.001`, `T1105` persisted in `case_events` and `soc_assessments`, null/malformed alert rejection, duplicate alert-id handling, 30-minute grouping, L1/L2 append-only history, analyst feedback separation, and two transaction rollback failure paths. Targeted Clippy with `-D warnings` passed.
+
+The harness exercises the real `SocCaseStore` PostgreSQL boundary rather than direct SQL inserts for primary behavior. Full upstream Wazuh normalization/EventBus execution remains covered by existing non-DB fixture tests and is not claimed as a live Wazuh run.
+
+## Previous blocking condition
 
 `STDIN_TRANSFER = BLOCKED`. The required inocuous probe (`printf ... | ssh ... 'cat > /tmp/... && sha256sum ...'`) was rejected by the managed execution environment before SSH session establishment with `socket: Operation not permitted`. Per procedure, no transfer workaround was attempted.
 

@@ -289,6 +289,15 @@ async fn assessments_are_append_only_and_projection_is_latest() {
         .get::<_, i64>(0),
         1
     );
+    let mitre: serde_json::Value = db
+        .query_one(
+            "SELECT mitre_correlation FROM soc_assessments WHERE assessment_id=$1",
+            &[&_l2],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(mitre[0]["id"], "T1078");
 }
 
 #[tokio::test]

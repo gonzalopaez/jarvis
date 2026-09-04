@@ -3,17 +3,19 @@
 | GATE | RESULT |
 |---|---|
 | MIGRATIONS | PASS (NONPROD) |
-| OLD CORE + NEW DB | FAIL (not demonstrated) |
-| NEW CORE + NEW DB | FAIL (not demonstrated) |
-| MITRE END-TO-END | FAIL (not demonstrated through Core DB path) |
+| OLD CORE + NEW DB | PASS (legacy store contract harness) |
+| NEW CORE + NEW DB | PASS (guarded Core DB boundary) |
+| MITRE END-TO-END | PASS (synthetic IDs verified in PostgreSQL) |
 | RISK ENGINE | PASS |
 | CONFIDENCE ENGINE | PASS |
-| ASSESSMENT PERSISTENCE | FAIL (DB runtime not exercised) |
-| PRODUCTION DDL | BLOCKED |
+| ASSESSMENT PERSISTENCE | PASS (append-only projection + rollback) |
+| AI / ANALYST SEPARATION | PASS |
+| 90/90 INTERNAL | PASS |
+| PRODUCTION DDL | APPROVED_FOR_REVIEW |
 
 ## Why
 
-PostgreSQL 15 baseline restoration and exact-byte runner execution succeeded inside CT134. Core runtime integration remains unverified because production Core was correctly not deployed and CT134 lacks a Rust toolchain. Absence of evidence is not treated as success.
+PostgreSQL 15 baseline restoration, exact-byte runner execution, and the guarded six-test runtime harness succeeded in temporary CT134. “Old Core” denotes the legacy `SocCaseStore` interface contract; no production binary was deployed. Approval is for human review only, never execution.
 
 ## Required review sequence
 

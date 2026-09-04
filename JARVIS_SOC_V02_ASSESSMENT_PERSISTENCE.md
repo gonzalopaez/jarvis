@@ -6,4 +6,4 @@ The operation starts one PostgreSQL transaction, inserts an immutable row into `
 
 AI and analyst verdict domains remain separate. This method does not write analyst feedback, emit 90/90 notifications, invoke voice, or request Tier 2.
 
-Compilation, formatting, unit tests and Clippy pass. Migration tables and constraints were validated in PostgreSQL 15 NONPROD. Runtime PostgreSQL integration is **UNVERIFIED** because CT134 intentionally has no Rust toolchain and no Core binary was deployed there; L1/L2 retention and projection rollback remain required.
+The guarded integration harness ran this path against PostgreSQL 15.19 in temporary CT134. L1 (`81/63 SUSPICIOUS`) and L2 (`94/93 TRUE_POSITIVE`) produced two immutable rows; the case projection reflected L2 while L1 remained intact. Analyst `FALSE_POSITIVE` feedback was stored separately with AI snapshots. Both an injected post-insert failure and an FK insert failure rolled back completely, leaving no assessment or projection change. No production Core binary or database was used.
