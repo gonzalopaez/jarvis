@@ -3,6 +3,7 @@
 Do not mark ahead of the window. This checklist is operational only; it does not authorize execution.
 
 - [ ] Human change ticket, operator and UTC start recorded
+- [ ] Execute [production preflight](JARVIS_SOC_V02_PRODUCTION_PREFLIGHT.md) immediately before the window
 - [ ] Reviewed commit `7e02f42d2c3ff2e89b357b38bdc085c7f33f1232` verified and clean
 - [ ] Migration/runner SHA-256 values verified
 - [ ] CT133 and hostname `jarvis-soc-db` verified

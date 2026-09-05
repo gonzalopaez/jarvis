@@ -64,3 +64,5 @@ Final gate is `PRODUCTION MIGRATION RUNBOOK = READY_FOR_REVIEW` and `PRODUCTION 
 ## Runner authorization review
 
 `scripts/soc-migrate.sh` has a deliberate fail-closed gate: `JARVIS_ALLOW_SOC_MIGRATIONS=YES`, an explicit `JARVIS_SOC_MIGRATION_DATABASE_URL`, and an exact `JARVIS_SOC_MIGRATION_EXPECTED_DATABASE` match. It also verifies each migration checksum from the selected tree, uses a transaction, advisory lock, 2-second lock timeout and 30-second statement timeout. It does not independently attest CT ID/hostname or schema fingerprint; those remain mandatory external prechecks in this runbook. Therefore `PRODUCTION EXECUTION = BLOCKED` until a human-approved window supplies all prechecks and credentials through the protected mechanism. No runner modification is made in this phase.
+
+The immediately-before-window procedure is maintained in [JARVIS_SOC_V02_PRODUCTION_PREFLIGHT.md](JARVIS_SOC_V02_PRODUCTION_PREFLIGHT.md). It contains exact read-only commands, the canonical fingerprint algorithm, backup validation steps, and the abort matrix.
