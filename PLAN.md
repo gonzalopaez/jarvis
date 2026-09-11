@@ -140,6 +140,30 @@ del operador antes de dar el punto 0 por cerrado y pasar al punto 1.
   lectura sobre la base nueva, mismo patrón sin LiteLLM propio.
 - [ ] Actualizar HUD: Memory Agent con estado real.
 
+#### 2A — Memoria de experiencia reutilizable (reordenada por el operador, 2026-09-11)
+
+- [x] Corregir el RAG para que preserve la selección de modelo del
+  `CapabilityRouter`, incluyendo síntesis multidominio y fallback de Codex.
+  Evidencia: `router_alias_is_preserved_without_qdrant_context`,
+  `qdrant_context_does_not_override_router_alias` y
+  `router_owns_codex_fallback_and_cross_domain_model_decisions`.
+- [x] Aceptar ADR-015: colección Qdrant separada, payload versionado sin
+  embedding duplicado, procedencia, expiración, revocación y escritura
+  fail-closed.
+- [x] Implementar recuperación read-only y acotada desde
+  `jarvis_skill_memory_v1`. La experiencia se inyecta después del routing y no
+  puede modificar alias, capability tier, autorización ni executor.
+- [x] Implementar el límite de escritura que acepta solamente
+  `task_outcome.verified.v1`, exige `executor_verified=true`, valida capability
+  y tier contra el catálogo y requiere autorización durable para Tier 2/3.
+- [ ] Conectar el productor y consumidor durable de `task_outcome.verified.v1`.
+  Sigue bloqueado deliberadamente: `RestrictedExecutor` está deshabilitado y el
+  runtime actual no posee un AuditSink/outbox durable que pueda emitir esa
+  señal. No se aprende de conversaciones completadas ni de eventos en memoria.
+- [ ] Crear/configurar `jarvis_skill_memory_v1`, entregar la credencial
+  `skill-memory-embeddings-token`, desplegar y verificar en producción. Nada de
+  esta etapa se declara desplegado por los tests de repositorio.
+
 ### 3 — Conocimiento de infraestructura (`qdrant-infra-rag` Paso 2)
 
 Paso 1 (rebase, descarte del ADR duplicado, guardrails reconfirmados) ya

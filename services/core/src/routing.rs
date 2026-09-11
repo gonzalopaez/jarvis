@@ -615,4 +615,19 @@ mod tests {
         assert_eq!(synthesis.alias(), "jarvis-reasoning");
         assert_eq!(synthesis.mode(), "multi_agent_rag");
     }
+
+    #[test]
+    fn conversation_and_transport_do_not_fix_model_aliases() {
+        for source in [
+            include_str!("conversation.rs"),
+            include_str!("transport.rs"),
+        ] {
+            let production = source
+                .split("\n#[cfg(test)]\nmod tests")
+                .next()
+                .unwrap_or(source);
+            assert!(!production.contains("\"jarvis-fast\""));
+            assert!(!production.contains("\"jarvis-reasoning\""));
+        }
+    }
 }

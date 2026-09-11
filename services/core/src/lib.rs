@@ -65,6 +65,8 @@ pub use session::{
     DEFAULT_SESSION_TTL, MAX_SESSIONS, SESSION_COOKIE_NAME,
 };
 #[cfg(feature = "network-server")]
+pub use skill_memory::{CommittedTaskOutcomeRecord, VerifiedTaskOutcome};
+#[cfg(feature = "network-server")]
 pub use skill_memory::{SkillMemoryClient, SkillMemoryConfig, SkillMemoryError};
 pub use soc::{
     calculate_confidence, calculate_final_priority, calculate_risk, count_independent_sources,

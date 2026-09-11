@@ -247,6 +247,12 @@ fn load_skill_memory_client() -> Result<Option<SkillMemoryClient>, &'static str>
     }
     let collection = collection
         .ok_or("JARVIS_SKILL_MEMORY_COLLECTION is required when skill memory is configured")?;
+    if env::var("JARVIS_RAG_COLLECTION")
+        .ok()
+        .is_some_and(|rag_collection| rag_collection == collection)
+    {
+        return Err("skill memory collection must be separate from RAG collection");
+    }
     let embedding_model = embedding_model
         .ok_or("JARVIS_SKILL_MEMORY_EMBEDDING_MODEL is required when skill memory is configured")?;
     let qdrant_base_url = env::var("JARVIS_QDRANT_URL")
