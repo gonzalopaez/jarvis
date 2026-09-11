@@ -60,8 +60,8 @@ See [`STATUS.md`](STATUS.md) for the full, evidence-backed breakdown (every clai
 | Cross-domain evidence fan-out (parallel, latency-budgeted) | ✅ Implemented, tested |
 | GPU-accelerated local inference (Vulkan/RADV) | 🚧 In progress, unmerged branch |
 | `RestrictedExecutor` (actual write/execute capability) | ⛔ Deployed, deliberately disabled |
-| Infrastructure knowledge (RAG) | 🚧 In progress, unmerged branch |
-| Reusable skill memory | 🧪 Read-only retrieval and guarded write boundary implemented on an unmerged branch; not deployed |
+| Infrastructure knowledge (RAG) | 🧪 Merged and tested; reindex/deployment pending |
+| Reusable skill memory | 🧪 Read-only retrieval and guarded write boundary merged; not deployed |
 
 Rows marked "tested" (without "in production") are backed by passing tests and a merged commit, but have not yet been confirmed running in the live deployment — see `STATUS.md` for the exact production-vs-test evidence split.
 
