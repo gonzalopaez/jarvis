@@ -4,7 +4,10 @@ use crate::{
     ResponseStatus, RestrictedExecutor, SessionStore, SystemHealth, API_VERSION,
 };
 #[cfg(feature = "network-server")]
-use crate::{ConversationService, VoicePipeline, VoicePipelineError};
+use crate::{
+    ConversationService, CoreOutboxStore, VoicePipeline, VoicePipelineError, WazuhReadFilter,
+    WazuhSecurityPoller,
+};
 use bytes::Bytes;
 use http::{
     header::{ALLOW, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, SET_COOKIE},
@@ -70,6 +73,16 @@ struct VoiceTimingLog {
 struct VoiceTimingGuard {
     log: VoiceTimingLog,
     total_started: Instant,
+}
+
+#[cfg(feature = "network-server")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WazuhReadRequest {
+    request_id: String,
+    host: Option<String>,
+    severity: Option<String>,
+    limit: usize,
 }
 
 #[cfg(feature = "network-server")]
@@ -150,6 +163,8 @@ pub struct Transport<E, A, U> {
     voice: Option<Arc<VoicePipeline>>,
     #[cfg(feature = "network-server")]
     conversation: Option<Arc<ConversationService>>,
+    #[cfg(feature = "network-server")]
+    wazuh_read: Option<Arc<(WazuhSecurityPoller, CoreOutboxStore)>>,
 }
 
 impl<E, A, U> Clone for Transport<E, A, U> {
@@ -165,6 +180,8 @@ impl<E, A, U> Clone for Transport<E, A, U> {
             voice: self.voice.clone(),
             #[cfg(feature = "network-server")]
             conversation: self.conversation.clone(),
+            #[cfg(feature = "network-server")]
+            wazuh_read: self.wazuh_read.clone(),
         }
     }
 }
@@ -195,6 +212,8 @@ where
             voice: None,
             #[cfg(feature = "network-server")]
             conversation: None,
+            #[cfg(feature = "network-server")]
+            wazuh_read: None,
         }
     }
 
@@ -212,6 +231,16 @@ where
     #[cfg(feature = "network-server")]
     pub fn with_conversation_service(mut self, conversation: ConversationService) -> Self {
         self.conversation = Some(Arc::new(conversation));
+        self
+    }
+
+    #[cfg(feature = "network-server")]
+    pub fn with_wazuh_read_adapter(
+        mut self,
+        adapter: WazuhSecurityPoller,
+        store: CoreOutboxStore,
+    ) -> Self {
+        self.wazuh_read = Some(Arc::new((adapter, store)));
         self
     }
 
@@ -276,6 +305,8 @@ where
                 self.handle_core_request(request).await
             }
             #[cfg(feature = "network-server")]
+            (&Method::POST, "/api/v1/tier1/wazuh/alerts") => self.handle_wazuh_read(request).await,
+            #[cfg(feature = "network-server")]
             (&Method::POST, "/api/v1/voice/alert") => self.handle_alert_audio(request).await,
             (_, "/v1/health") => method_not_allowed("GET"),
             (_, "/api/v1/health" | "/api/v1/agents") => method_not_allowed("GET"),
@@ -283,7 +314,105 @@ where
             (_, "/ws" | "/ws/voice") => method_not_allowed("GET"),
             (_, "/v1/requests" | "/api/v1/requests") => method_not_allowed("POST"),
             (_, "/api/v1/voice/alert") => method_not_allowed("POST"),
+            (_, "/api/v1/tier1/wazuh/alerts") => method_not_allowed("POST"),
             _ => transport_error(StatusCode::NOT_FOUND, "NOT_FOUND", "Route not found"),
+        }
+    }
+
+    #[cfg(feature = "network-server")]
+    async fn handle_wazuh_read<B>(&self, request: Request<B>) -> Response<ResponseBody>
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        let uses_bearer = request.headers().contains_key(AUTHORIZATION);
+        let auth = match self.authenticate(request.headers()) {
+            Ok(auth) => auth,
+            Err(_) => {
+                return transport_error(
+                    StatusCode::UNAUTHORIZED,
+                    "AUTHENTICATION_REQUIRED",
+                    "Valid authentication is required",
+                )
+            }
+        };
+        if !uses_bearer && !self.valid_session_write(request.headers()) {
+            return transport_error(
+                StatusCode::FORBIDDEN,
+                "CSRF_REJECTED",
+                "Session request validation failed",
+            );
+        }
+        if !is_json(request.headers())
+            || content_length_exceeds(request.headers(), self.config.max_body_bytes)
+        {
+            return transport_error(
+                StatusCode::BAD_REQUEST,
+                "INVALID_REQUEST",
+                "A bounded JSON request is required",
+            );
+        }
+        let Some(service) = &self.wazuh_read else {
+            return transport_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "WAZUH_READ_UNAVAILABLE",
+                "Wazuh Tier 1 reads are unavailable",
+            );
+        };
+        let body = Limited::new(request.into_body(), self.config.max_body_bytes).collect();
+        let Ok(Ok(collected)) = tokio::time::timeout(self.config.request_timeout, body).await
+        else {
+            return transport_error(
+                StatusCode::BAD_REQUEST,
+                "INVALID_REQUEST",
+                "A bounded JSON request is required",
+            );
+        };
+        let Ok(input) = serde_json::from_slice::<WazuhReadRequest>(&collected.to_bytes()) else {
+            return transport_error(
+                StatusCode::BAD_REQUEST,
+                "INVALID_REQUEST",
+                "Wazuh read request is invalid",
+            );
+        };
+        let Some(subject) = auth
+            .principal
+            .as_ref()
+            .map(|principal| principal.subject.as_str())
+        else {
+            return transport_error(
+                StatusCode::UNAUTHORIZED,
+                "AUTHENTICATION_REQUIRED",
+                "Valid authentication is required",
+            );
+        };
+        let filter = WazuhReadFilter {
+            host: input.host,
+            severity: input.severity,
+            limit: input.limit,
+        };
+        match service
+            .0
+            .verified_read_and_commit(&service.1, &input.request_id, subject, &filter)
+            .await
+        {
+            Ok(record) => json_response(
+                StatusCode::OK,
+                &serde_json::json!({
+                    "api_version": API_VERSION,
+                    "request_id": input.request_id,
+                    "event_id": record.source_event_id,
+                    "audit_id": record.source_audit_id,
+                    "capability": record.capability,
+                    "capability_tier": record.capability_tier,
+                    "status": "verified"
+                }),
+            ),
+            Err(_) => transport_error(
+                StatusCode::BAD_GATEWAY,
+                "WAZUH_READ_NOT_VERIFIED",
+                "Wazuh read result could not be verified",
+            ),
         }
     }
 
