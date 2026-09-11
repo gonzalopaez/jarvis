@@ -1,6 +1,6 @@
 # PLAN — Jarvis hacia un agente SOC operativo
 
-Última actualización: 2026-09-02, contra `origin/main@1092e01`.
+Última actualización: 2026-09-11, contra `origin/main@c30a570`.
 
 Este documento es la ÚNICA fuente de verdad sobre qué falta y en qué orden.
 Actualizalo vos mismo al cerrar cada etapa (marcar hecho, mover al historial
@@ -156,13 +156,77 @@ del operador antes de dar el punto 0 por cerrado y pasar al punto 1.
 - [x] Implementar el límite de escritura que acepta solamente
   `task_outcome.verified.v1`, exige `executor_verified=true`, valida capability
   y tier contra el catálogo y requiere autorización durable para Tier 2/3.
-- [ ] Conectar el productor y consumidor durable de `task_outcome.verified.v1`.
-  Sigue bloqueado deliberadamente: `RestrictedExecutor` está deshabilitado y el
-  runtime actual no posee un AuditSink/outbox durable que pueda emitir esa
-  señal. No se aprende de conversaciones completadas ni de eventos en memoria.
-- [ ] Crear/configurar `jarvis_skill_memory_v1`, entregar la credencial
-  `skill-memory-embeddings-token`, desplegar y verificar en producción. Nada de
-  esta etapa se declara desplegado por los tests de repositorio.
+- [x] Conectar el productor y consumidor durable de `task_outcome.verified.v1`
+  (PR #8, `4daafb3`). Esquema propio `jarvis_core.{audit_events,outbox_events}`
+  en una base PostgreSQL dedicada (CT136, no `jarvis_soc`), consumidor con
+  `FOR UPDATE SKIP LOCKED`, reintentos con backoff, idempotencia por
+  `event_id`. Tier 2/3 rechazados explícitamente antes de `write_verified()`.
+  `RestrictedExecutor` sigue deshabilitado — esto es exclusivamente para
+  lecturas Tier 1 verificadas.
+- [x] Crear/configurar `jarvis_skill_memory_v1`, entregar la credencial
+  `skill-memory-embeddings-token`, desplegar y verificar en producción
+  (2026-09-11). Validado con una tarea Tier 1 real
+  (`wazuh.alerts.read`): escritura confirmada (`state: delivered` en el
+  outbox) y recuperación confirmada (`score: 0.663`, por encima del umbral
+  0.60) contra la instancia real de Qdrant. Ver STATUS.md para el detalle
+  completo, incluida la cadena de gaps de infraestructura preexistentes que
+  este despliegue destapó (contenedores detenidos, bug de esquema
+  http/https, permisos de schema, LiteLLM sin modelo de embeddings).
+
+### 2B — Hallazgos operativos registrados, no resueltos (2026-09-11)
+
+Encontrados durante el despliegue y validación en producción del punto 2A.
+Ninguno es parte de ese alcance ni fue introducido por él — son gaps
+preexistentes que ese despliegue fue el primero en ejercitar de verdad. Se
+documentan acá para no perderlos; no requieren resolverse ahora.
+
+- [ ] **RAG (`jarvis_knowledge_bge_v1`) sin funcionar en producción, más
+  allá del fix de routing ya hecho.** El fix de "un solo cerebro"
+  (`router_alias_is_preserved_without_qdrant_context`, mergeado antes) es
+  correcto, pero el lado de datos/credenciales nunca se terminó de
+  conectar: `JARVIS_QDRANT_URL`/`JARVIS_RAG_COLLECTION`/
+  `JARVIS_RAG_EMBEDDING_MODEL` recién se cablearon al unit de Core el
+  2026-09-11 (como efecto colateral necesario de habilitar skill-memory,
+  que comparte `JARVIS_QDRANT_URL`), y `rag-embeddings-token` sigue siendo
+  una virtual-key de LiteLLM que depende de una base de datos que CT135 no
+  tiene (`"No connected db."`, ver hallazgo siguiente). La colección
+  `jarvis_knowledge_bge_v1` existe en Qdrant (91 puntos), pero nadie sabe
+  con certeza cuándo ni cómo se indexó — no hay evidencia de que haya
+  pasado nunca por el pipeline de Core corriendo. Falta: decidir si
+  `rag-embeddings-token` pasa a ser el master key (mismo criterio que se
+  aplicó a `skill-memory-embeddings-token`) o si se le da su propia
+  identidad, y verificar/re-indexar el contenido real de la colección.
+- [ ] **`AgentHealthPoller` reporta Voice/MCP/n8n/Wazuh como `OFFLINE`
+  pese a estar sanos.** `/api/v1/health` en producción (CT124) muestra los
+  cuatro componentes en `unavailable`/`not_connected` incluso cuando cada
+  uno responde `200 {"status":"healthy"}` en su propio `v1/health` (o
+  `healthz` para n8n) al pegarle directo desde CT124 — mismo host, mismo
+  puerto, mismo path que usa el poller (`services/core/src/agent_health.rs`,
+  intervalo de 15s). El pipeline de Wazuh Tier 1 (lectura → outbox →
+  Qdrant → recuperación) se probó funcionando end-to-end de forma
+  independiente el mismo día, así que esto es un problema del
+  poller/consumo de eventos del HUD, no de los servicios en sí. No se
+  investigó la causa — candidatos sin descartar: el `EventBus` en memoria
+  (64 eventos, ADR conocido) perdiendo los eventos `AgentStatusChanged`
+  antes de que el endpoint de health los lea, o un cambio de comportamiento
+  entre el binario del 9-sep (que sí mostraba estos componentes
+  `healthy`/`REALTIME`) y el commit actual.
+- [ ] **CT135 (`litellm-codex`) no tiene base de datos propia.** Su
+  `config.yaml`/`litellm.env` no define `database_url`; cualquier llamada
+  autenticada con una virtual-key (no el master key) falla con
+  `litellm.proxy.proxy_server.user_api_key_auth(): ... "No connected db."`.
+  El log del 10-sep muestra un `POST /v1/chat/completions 200 OK` exitoso
+  antes de que el contenedor se detuviera esa misma noche — así que en algún
+  momento esto funcionaba (o solo se usó el master key desde el vamos). El
+  mitigado actual (`skill-memory-embeddings-token` apuntando al mismo valor
+  que `litellm-token`) es un workaround, no una solución: evita el chequeo
+  de DB en vez de arreglarlo. Falta decidir: ¿CT135 necesita su propia base
+  (como la tiene CT116, self-contained con Postgres+Ollama), o todos los
+  llamadores deberían migrar al master key y dejar de usar virtual-keys acá?
+  También le falta a CT135 un modelo de embeddings propio más allá del que
+  se agregó ad-hoc el 2026-09-11 (`jarvis-embed-multilingual` →
+  `ollama/bge-m3` proxeando a CT116); si CT116 se apaga o cambia de IP, el
+  routing de embeddings de CT135 se rompe sin aviso.
 
 ### 3 — Conocimiento de infraestructura (`qdrant-infra-rag` Paso 2)
 
