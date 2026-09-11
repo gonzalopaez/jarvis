@@ -941,13 +941,7 @@ async fn run_voice_websocket(
                         )
                         .await
                     } else {
-                        process_unrouted_voice(
-                            pipeline,
-                            mime_type.as_deref().unwrap_or("audio/webm;codecs=opus"),
-                            captured_audio,
-                            &mut timing.log,
-                        )
-                        .await
+                        Err(VoicePipelineError::ModelUnavailable)
                     };
                     match result {
                         Ok(result) => {
@@ -1096,33 +1090,6 @@ async fn process_routed_voice(
         transcript,
         response: response_text,
         audio: output,
-    })
-}
-
-#[cfg(feature = "network-server")]
-async fn process_unrouted_voice(
-    pipeline: &VoicePipeline,
-    mime_type: &str,
-    audio: Vec<u8>,
-    timings: &mut VoiceTimingLog,
-) -> Result<crate::VoicePipelineResult, VoicePipelineError> {
-    let stt_started = Instant::now();
-    let transcript = pipeline.transcribe_audio(mime_type, audio).await;
-    timings.stt_ms = elapsed_ms(stt_started);
-    let transcript = transcript?;
-
-    let llm_started = Instant::now();
-    let response = pipeline.complete_text(&transcript, "jarvis-fast").await;
-    timings.llm_ms = elapsed_ms(llm_started);
-    let response = response?;
-
-    let tts_started = Instant::now();
-    let audio = pipeline.synthesize_text(&response).await;
-    timings.tts_ms = elapsed_ms(tts_started);
-    Ok(crate::VoicePipelineResult {
-        transcript,
-        response,
-        audio: audio?,
     })
 }
 

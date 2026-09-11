@@ -37,7 +37,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Test Core
-        run: cargo test --locked -p jarvis-core --all-features
+        run: cargo test --locked -p jarvis-core --features network-server
 
       - name: Lint Core
         run: cargo clippy --locked -p jarvis-core --all-features --all-targets -- -D warnings

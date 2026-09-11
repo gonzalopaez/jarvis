@@ -1,0 +1,1 @@
+{"id":"B-001","timestamp":"2026-01-01T10:00:00Z","agent":{"id":"102","name":"host-b"},"rule":{"id":"5002","level":10,"description":"Synthetic PowerShell"},"data":{"dstuser":"admin-test","process":"powershell.exe","command_line":"synthetic-approved-command"}}

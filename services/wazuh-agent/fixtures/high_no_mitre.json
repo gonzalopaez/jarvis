@@ -1,0 +1,1 @@
+{"id":"A-001","timestamp":"2026-01-01T10:00:00Z","agent":{"id":"101","name":"host-a"},"rule":{"id":"5001","level":11,"description":"Synthetic high alert"},"data":{"srcip":"192.0.2.10"}}

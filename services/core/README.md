@@ -71,10 +71,26 @@ The Desktop HUD is served read-only through Nginx Proxy Manager at
 and the authenticated `/ws` upgrade behind it. See `STATUS.md` at the repo root
 for the live, verified deployment state.
 
+Conversation can optionally retrieve reviewed infrastructure documentation
+from Qdrant before calling LiteLLM. This RAG path is read-only, bounded and
+fails open to ordinary conversation when retrieval is unavailable; it does not
+replace authenticated tools for live state. See `docs/adr/ADR-013-qdrant-infrastructure-rag.md`.
+
+Core can also retrieve bounded reusable experience from the separate
+`jarvis_skill_memory_v1` collection. It is untrusted context added only after
+the Capability Router selects a model. Enable it with the
+`JARVIS_SKILL_MEMORY_*` variables and a systemd credential named
+`skill-memory-embeddings-token`; add that `LoadCredential` entry through a
+deployment drop-in only when the optional feature is enabled. Automatic writes
+remain disconnected until Core has the durable verified-outcome producer
+defined by `docs/adr/ADR-015-skill-memory-layer.md`.
+
 WebSocket startup additionally requires `JARVIS_WEB_ORIGIN` as one exact HTTPS origin without a trailing slash. The gateway fails closed when missing, rejects anonymous or cross-origin upgrades and does not provide a browser authentication bypass.
 
 ## Test
 
     cargo test -p jarvis-core
     cargo test -p jarvis-core --features network-server
+    # Requires an explicitly non-production database prepared by the SOC rehearsal runbook:
+    JARVIS_SOC_TEST_DB_URL=postgresql://... cargo test -p jarvis-core --all-features --test soc_db_integration
     cargo clippy -p jarvis-core --all-features --all-targets -- -D warnings

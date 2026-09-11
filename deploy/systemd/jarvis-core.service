@@ -12,6 +12,7 @@ EnvironmentFile=/etc/jarvis-core/environment
 LoadCredential=auth-registry.json:/etc/jarvis-core/auth-registry.json
 LoadCredential=voice-service-token:/etc/jarvis-core/voice-service-token
 LoadCredential=litellm-token:/etc/jarvis-core/litellm-token
+LoadCredential=rag-embeddings-token:/etc/jarvis-core/rag-embeddings-token
 LoadCredential=codex-service-token:/etc/jarvis-core/codex-service-token
 LoadCredential=wazuh-relay-token:/etc/jarvis-core/wazuh-relay-token
 ExecStart=/usr/local/bin/jarvis-core

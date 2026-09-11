@@ -1,10 +1,10 @@
 use jarvis_core::{
     bind_private, run_prometheus_availability_until, serve_until, ActionRequest, AgentHealthCheck,
     AgentHealthPoller, AuditEvent, AuditSink, BearerAuthenticator, CodexHttpClient,
-    ConversationService, CoreGateway, CredentialRecord, EventBus, ExecutionResult, PolicyEngine,
-    Principal, PrometheusTelemetryAdapter, RestrictedExecutor, TelemetryService, Transport,
-    TransportConfig, VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller,
-    DEFAULT_TELEMETRY_INTERVAL,
+    ConversationService, CoreGateway, CredentialRecord, EventBus, ExecutionResult, KnowledgeClient,
+    KnowledgeConfig, PolicyEngine, Principal, PrometheusTelemetryAdapter, RestrictedExecutor,
+    SkillMemoryClient, SkillMemoryConfig, TelemetryService, Transport, TransportConfig,
+    VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller, DEFAULT_TELEMETRY_INTERVAL,
 };
 use reqwest::Url;
 use serde::Deserialize;
@@ -16,6 +16,8 @@ const MAX_CREDENTIAL_FILE_BYTES: u64 = 64 * 1024;
 const VOICE_CREDENTIAL_NAME: &str = "voice-service-token";
 const LITELLM_CREDENTIAL_NAME: &str = "litellm-token";
 const CODEX_CREDENTIAL_NAME: &str = "codex-service-token";
+const RAG_EMBEDDINGS_CREDENTIAL_NAME: &str = "rag-embeddings-token";
+const SKILL_MEMORY_CREDENTIAL_NAME: &str = "skill-memory-embeddings-token";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -81,7 +83,17 @@ async fn run() -> Result<(), &'static str> {
     let events = EventBus::default();
     let codex = load_codex_client()?;
     let codex_configured = codex.is_some();
-    let conversation = ConversationService::new(voice.clone(), codex, events.clone());
+    let knowledge = load_knowledge_client()?;
+    let rag_configured = knowledge.is_some();
+    let skill_memory = load_skill_memory_client()?;
+    let skill_memory_configured = skill_memory.is_some();
+    let mut conversation = ConversationService::new(voice.clone(), codex, events.clone());
+    if let Some(knowledge) = knowledge {
+        conversation = conversation.with_knowledge(knowledge);
+    }
+    if let Some(skill_memory) = skill_memory {
+        conversation = conversation.with_skill_memory(skill_memory);
+    }
     let transport = Transport::with_config(
         gateway,
         authenticator,
@@ -167,7 +179,9 @@ async fn run() -> Result<(), &'static str> {
         tokio::spawn(poller.run_until(transport.event_bus(), std::future::pending()))
     };
 
-    eprintln!("jarvis-core ready on {bind_address}");
+    eprintln!(
+        "jarvis-core ready on {bind_address}; rag_enabled={rag_configured}; skill_memory_enabled={skill_memory_configured}"
+    );
     let result = serve_until(listener, transport, shutdown_signal())
         .await
         .map_err(|_| "network server stopped unexpectedly");
@@ -182,6 +196,92 @@ async fn run() -> Result<(), &'static str> {
     agent_health_task.abort();
     let _ = agent_health_task.await;
     result
+}
+
+fn load_knowledge_client() -> Result<Option<KnowledgeClient>, &'static str> {
+    let qdrant = env::var("JARVIS_QDRANT_URL").ok();
+    let collection = env::var("JARVIS_RAG_COLLECTION").ok();
+    let embedding_model = env::var("JARVIS_RAG_EMBEDDING_MODEL").ok();
+    if qdrant.is_none() && collection.is_none() && embedding_model.is_none() {
+        return Ok(None);
+    }
+    let qdrant_base_url = qdrant
+        .ok_or("JARVIS_QDRANT_URL is required when RAG is configured")?
+        .parse()
+        .map_err(|_| "JARVIS_QDRANT_URL is invalid")?;
+    let collection =
+        collection.ok_or("JARVIS_RAG_COLLECTION is required when RAG is configured")?;
+    let embedding_model =
+        embedding_model.ok_or("JARVIS_RAG_EMBEDDING_MODEL is required when RAG is configured")?;
+    let score_threshold = env::var("JARVIS_RAG_SCORE_THRESHOLD")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<f64>()
+                .map_err(|_| "JARVIS_RAG_SCORE_THRESHOLD is invalid")
+        })
+        .transpose()?
+        .unwrap_or(0.55);
+    let litellm_base_url = env::var("JARVIS_LITELLM_URL")
+        .map_err(|_| "JARVIS_LITELLM_URL is required")?
+        .parse()
+        .map_err(|_| "JARVIS_LITELLM_URL is invalid")?;
+    KnowledgeClient::new(KnowledgeConfig {
+        litellm_base_url,
+        litellm_token: load_secret(RAG_EMBEDDINGS_CREDENTIAL_NAME, 20)?,
+        embedding_model,
+        qdrant_base_url,
+        collection,
+        limit: 4,
+        score_threshold,
+    })
+    .map(Some)
+    .map_err(|_| "RAG configuration is invalid")
+}
+
+fn load_skill_memory_client() -> Result<Option<SkillMemoryClient>, &'static str> {
+    let collection = env::var("JARVIS_SKILL_MEMORY_COLLECTION").ok();
+    let embedding_model = env::var("JARVIS_SKILL_MEMORY_EMBEDDING_MODEL").ok();
+    if collection.is_none() && embedding_model.is_none() {
+        return Ok(None);
+    }
+    let collection = collection
+        .ok_or("JARVIS_SKILL_MEMORY_COLLECTION is required when skill memory is configured")?;
+    if env::var("JARVIS_RAG_COLLECTION")
+        .ok()
+        .is_some_and(|rag_collection| rag_collection == collection)
+    {
+        return Err("skill memory collection must be separate from RAG collection");
+    }
+    let embedding_model = embedding_model
+        .ok_or("JARVIS_SKILL_MEMORY_EMBEDDING_MODEL is required when skill memory is configured")?;
+    let qdrant_base_url = env::var("JARVIS_QDRANT_URL")
+        .map_err(|_| "JARVIS_QDRANT_URL is required when skill memory is configured")?
+        .parse()
+        .map_err(|_| "JARVIS_QDRANT_URL is invalid")?;
+    let litellm_base_url = env::var("JARVIS_LITELLM_URL")
+        .map_err(|_| "JARVIS_LITELLM_URL is required")?
+        .parse()
+        .map_err(|_| "JARVIS_LITELLM_URL is invalid")?;
+    let score_threshold = env::var("JARVIS_SKILL_MEMORY_SCORE_THRESHOLD")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<f64>()
+                .map_err(|_| "JARVIS_SKILL_MEMORY_SCORE_THRESHOLD is invalid")
+        })
+        .transpose()?
+        .unwrap_or(0.60);
+    SkillMemoryClient::new(SkillMemoryConfig {
+        litellm_base_url,
+        litellm_token: load_secret(SKILL_MEMORY_CREDENTIAL_NAME, 20)?,
+        embedding_model,
+        qdrant_base_url,
+        collection,
+        score_threshold,
+    })
+    .map(Some)
+    .map_err(|_| "skill memory configuration is invalid")
 }
 
 fn agent_health_url(

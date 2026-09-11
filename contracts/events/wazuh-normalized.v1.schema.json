@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/events/wazuh-normalized.v1.schema.json",
+  "title": "Canonical Wazuh normalized event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source", "alert_id", "timestamp", "timestamp_ms", "received_at", "agent", "rule", "mitre", "entities", "decoder", "location", "raw_reference"],
+  "properties": {
+    "schema_version": { "const": "wazuh.normalized.v1" },
+    "source": { "const": "wazuh" },
+    "alert_id": { "type": ["string", "null"], "maxLength": 128 },
+    "timestamp": { "type": ["string", "null"], "maxLength": 128 },
+    "timestamp_ms": { "type": ["integer", "null"], "minimum": 0 },
+    "received_at": { "type": "string", "maxLength": 128 },
+    "agent": { "$ref": "#/$defs/agent" },
+    "rule": { "$ref": "#/$defs/rule" },
+    "mitre": { "type": ["array", "null"], "maxItems": 32, "items": { "$ref": "#/$defs/mitre" } },
+    "entities": { "$ref": "#/$defs/entities" },
+    "decoder": { "anyOf": [{ "$ref": "#/$defs/decoder" }, { "type": "null" }] },
+    "location": { "type": ["string", "null"], "maxLength": 512 },
+    "raw_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "alert_id"],
+      "properties": {
+        "source": { "const": "wazuh-alerts-json" },
+        "alert_id": { "type": ["string", "null"], "maxLength": 128 }
+      }
+    }
+  },
+  "$defs": {
+    "nullable128": { "type": ["string", "null"], "maxLength": 128 },
+    "agent": {
+      "type": "object", "additionalProperties": false, "required": ["id", "name"],
+      "properties": { "id": { "$ref": "#/$defs/nullable128" }, "name": { "$ref": "#/$defs/nullable128" } }
+    },
+    "rule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "level", "description", "groups", "frequency"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nullable128" },
+        "level": { "type": ["integer", "null"], "minimum": 0, "maximum": 255 },
+        "description": { "type": ["string", "null"], "maxLength": 160 },
+        "groups": { "type": ["array", "null"], "maxItems": 64, "items": { "type": "string", "maxLength": 128 } },
+        "frequency": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "mitre": {
+      "type": "object", "additionalProperties": false, "required": ["id", "tactic", "technique"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "tactic": { "$ref": "#/$defs/nullable128" },
+        "technique": { "$ref": "#/$defs/nullable128" }
+      }
+    },
+    "hash": {
+      "type": "object", "additionalProperties": false, "required": ["algorithm", "value"],
+      "properties": {
+        "algorithm": { "type": ["string", "null"], "enum": ["sha256", "sha1", "md5", null] },
+        "value": { "type": ["string", "null"], "maxLength": 256 }
+      }
+    },
+    "entities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["host", "src_user", "dst_user", "user", "src_ip", "dst_ip", "process", "parent_process", "command_line", "file", "hash"],
+      "properties": {
+        "host": { "$ref": "#/$defs/nullable128" },
+        "src_user": { "$ref": "#/$defs/nullable128" },
+        "dst_user": { "$ref": "#/$defs/nullable128" },
+        "user": { "$ref": "#/$defs/nullable128" },
+        "src_ip": { "type": ["string", "null"], "maxLength": 45 },
+        "dst_ip": { "type": ["string", "null"], "maxLength": 45 },
+        "process": { "type": ["string", "null"], "maxLength": 256 },
+        "parent_process": { "type": ["string", "null"], "maxLength": 256 },
+        "command_line": { "type": ["string", "null"], "maxLength": 2000 },
+        "file": { "type": ["string", "null"], "maxLength": 512 },
+        "hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+      }
+    },
+    "decoder": {
+      "type": "object", "additionalProperties": false, "required": ["name", "parent"],
+      "properties": { "name": { "$ref": "#/$defs/nullable128" }, "parent": { "$ref": "#/$defs/nullable128" } }
+    }
+  }
+}
