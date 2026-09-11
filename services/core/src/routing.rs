@@ -60,8 +60,33 @@ pub struct RoutingDecision {
     pub reason: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelPurpose {
+    RoutedResponse,
+    CodexFallback,
+    CrossDomainSynthesis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelDecision {
+    alias: &'static str,
+    mode: &'static str,
+}
+
+impl ModelDecision {
+    pub fn alias(self) -> &'static str {
+        self.alias
+    }
+
+    pub fn mode(self) -> &'static str {
+        self.mode
+    }
+}
+
 pub trait CapabilityRouter: Send + Sync {
     fn decide(&self, request: &CapabilityRequest) -> RoutingDecision;
+    fn decide_model(&self, route: &RoutingDecision, purpose: ModelPurpose)
+        -> Option<ModelDecision>;
 }
 
 /// Conservative first-stage router. It is intentionally deterministic and
@@ -329,6 +354,34 @@ impl CapabilityRouter for DeterministicCapabilityRouter {
             "low-complexity conversation",
         )
     }
+
+    fn decide_model(
+        &self,
+        route: &RoutingDecision,
+        purpose: ModelPurpose,
+    ) -> Option<ModelDecision> {
+        match (purpose, route.route, route.model_alias) {
+            (ModelPurpose::RoutedResponse, CapabilityRoute::FastModel, Some("jarvis-fast")) => {
+                Some(model_decision("jarvis-fast", "fast"))
+            }
+            (
+                ModelPurpose::RoutedResponse,
+                CapabilityRoute::ReasoningModel,
+                Some("jarvis-reasoning"),
+            ) => Some(model_decision("jarvis-reasoning", "smart")),
+            (ModelPurpose::CodexFallback, CapabilityRoute::Codex, None) => {
+                Some(model_decision("jarvis-reasoning", "fallback"))
+            }
+            (ModelPurpose::CrossDomainSynthesis, CapabilityRoute::CrossDomainAgents, None) => {
+                Some(model_decision("jarvis-reasoning", "multi_agent_rag"))
+            }
+            _ => None,
+        }
+    }
+}
+
+fn model_decision(alias: &'static str, mode: &'static str) -> ModelDecision {
+    ModelDecision { alias, mode }
 }
 
 fn model(
@@ -542,5 +595,24 @@ mod tests {
             router.decide(&request).model_alias,
             Some("jarvis-reasoning")
         );
+    }
+
+    #[test]
+    fn router_owns_codex_fallback_and_cross_domain_model_decisions() {
+        let router = DeterministicCapabilityRouter;
+        let codex = route("Analiza este código Rust");
+        let fallback = router
+            .decide_model(&codex, ModelPurpose::CodexFallback)
+            .expect("Codex fallback model");
+        assert_eq!(fallback.alias(), "jarvis-reasoning");
+        assert_eq!(fallback.mode(), "fallback");
+
+        let cross_domain =
+            route("Correlacioná la telemetría de Prometheus con las alertas críticas de Wazuh");
+        let synthesis = router
+            .decide_model(&cross_domain, ModelPurpose::CrossDomainSynthesis)
+            .expect("cross-domain synthesis model");
+        assert_eq!(synthesis.alias(), "jarvis-reasoning");
+        assert_eq!(synthesis.mode(), "multi_agent_rag");
     }
 }

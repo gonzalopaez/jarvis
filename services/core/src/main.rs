@@ -1,11 +1,10 @@
 use jarvis_core::{
     bind_private, run_prometheus_availability_until, serve_until, ActionRequest, AgentHealthCheck,
     AgentHealthPoller, AuditEvent, AuditSink, BearerAuthenticator, CodexHttpClient,
-    ConversationService, CoreGateway, CredentialRecord, EventBus, ExecutionResult,
-    KnowledgeClient, KnowledgeConfig, PolicyEngine,
-    Principal, PrometheusTelemetryAdapter, RestrictedExecutor, TelemetryService, Transport,
-    TransportConfig, VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller,
-    DEFAULT_TELEMETRY_INTERVAL,
+    ConversationService, CoreGateway, CredentialRecord, EventBus, ExecutionResult, KnowledgeClient,
+    KnowledgeConfig, PolicyEngine, Principal, PrometheusTelemetryAdapter, RestrictedExecutor,
+    TelemetryService, Transport, TransportConfig, VoicePipeline, VoicePipelineConfig,
+    WazuhSecurityPoller, DEFAULT_TELEMETRY_INTERVAL,
 };
 use reqwest::Url;
 use serde::Deserialize;

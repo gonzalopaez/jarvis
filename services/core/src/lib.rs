@@ -54,7 +54,7 @@ pub use policy::{AuthorizationError, Decision, PolicyEngine, Risk, Rule};
 pub use rag::{KnowledgeClient, KnowledgeConfig, KnowledgeError};
 pub use routing::{
     AiMode, CapabilityRequest, CapabilityRoute, CapabilityRouter, Complexity,
-    DeterministicCapabilityRouter, RequestSource, RoutingDecision,
+    DeterministicCapabilityRouter, ModelDecision, ModelPurpose, RequestSource, RoutingDecision,
 };
 #[cfg(feature = "network-server")]
 pub use security::WazuhSecurityPoller;
