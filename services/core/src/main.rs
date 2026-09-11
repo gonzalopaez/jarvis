@@ -1,10 +1,11 @@
 use jarvis_core::{
-    bind_private, run_prometheus_availability_until, serve_until, ActionRequest, AgentHealthCheck,
-    AgentHealthPoller, AuditEvent, AuditSink, BearerAuthenticator, CodexHttpClient,
-    ConversationService, CoreGateway, CredentialRecord, EventBus, ExecutionResult, KnowledgeClient,
-    KnowledgeConfig, PolicyEngine, Principal, PrometheusTelemetryAdapter, RestrictedExecutor,
-    SkillMemoryClient, SkillMemoryConfig, TelemetryService, Transport, TransportConfig,
-    VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller, DEFAULT_TELEMETRY_INTERVAL,
+    bind_private, run_prometheus_availability_until, run_skill_outbox_until, serve_until,
+    ActionRequest, AgentHealthCheck, AgentHealthPoller, AuditEvent, AuditSink, BearerAuthenticator,
+    CodexHttpClient, ConversationService, CoreGateway, CoreOutboxStore, CredentialRecord, EventBus,
+    ExecutionResult, KnowledgeClient, KnowledgeConfig, PolicyEngine, Principal,
+    PrometheusTelemetryAdapter, RestrictedExecutor, SkillMemoryClient, SkillMemoryConfig,
+    TelemetryService, TierOneSkillConsumer, Transport, TransportConfig, VoicePipeline,
+    VoicePipelineConfig, WazuhSecurityPoller, DEFAULT_TELEMETRY_INTERVAL,
 };
 use reqwest::Url;
 use serde::Deserialize;
@@ -18,6 +19,7 @@ const LITELLM_CREDENTIAL_NAME: &str = "litellm-token";
 const CODEX_CREDENTIAL_NAME: &str = "codex-service-token";
 const RAG_EMBEDDINGS_CREDENTIAL_NAME: &str = "rag-embeddings-token";
 const SKILL_MEMORY_CREDENTIAL_NAME: &str = "skill-memory-embeddings-token";
+const CORE_DATABASE_CREDENTIAL_NAME: &str = "core-database-password";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,6 +89,17 @@ async fn run() -> Result<(), &'static str> {
     let rag_configured = knowledge.is_some();
     let skill_memory = load_skill_memory_client()?;
     let skill_memory_configured = skill_memory.is_some();
+    let outbox_store = load_core_outbox_store().await?;
+    let outbox_task = match (outbox_store.clone(), skill_memory.clone()) {
+        (Some(store), Some(memory)) => Some(tokio::spawn(run_skill_outbox_until(
+            store,
+            TierOneSkillConsumer::new(memory),
+            std::future::pending(),
+        ))),
+        (Some(_), None) => return Err("Core outbox requires configured skill memory"),
+        (None, _) => None,
+    };
+    let wazuh_adapter = load_wazuh_adapter()?;
     let mut conversation = ConversationService::new(voice.clone(), codex, events.clone());
     if let Some(knowledge) = knowledge {
         conversation = conversation.with_knowledge(knowledge);
@@ -94,7 +107,7 @@ async fn run() -> Result<(), &'static str> {
     if let Some(skill_memory) = skill_memory {
         conversation = conversation.with_skill_memory(skill_memory);
     }
-    let transport = Transport::with_config(
+    let mut transport = Transport::with_config(
         gateway,
         authenticator,
         TransportConfig {
@@ -106,6 +119,9 @@ async fn run() -> Result<(), &'static str> {
     .with_codex_configured(codex_configured)
     .with_voice_pipeline(voice)
     .with_conversation_service(conversation);
+    if let (Some(adapter), Some(store)) = (wazuh_adapter.clone(), outbox_store) {
+        transport = transport.with_wazuh_read_adapter(adapter, store);
+    }
     let prometheus_url = env::var("JARVIS_PROMETHEUS_URL")
         .map_err(|_| "JARVIS_PROMETHEUS_URL is required")?
         .parse()
@@ -127,20 +143,14 @@ async fn run() -> Result<(), &'static str> {
         transport.event_bus(),
         std::future::pending(),
     ));
-    let wazuh_task = match env::var("JARVIS_WAZUH_RELAY_URL") {
-        Ok(value) if !value.trim().is_empty() => {
-            let url = value
-                .parse()
-                .map_err(|_| "JARVIS_WAZUH_RELAY_URL is invalid")?;
-            let token = load_secret("wazuh-relay-token", 32)?;
-            let poller = WazuhSecurityPoller::new(url, token)
-                .map_err(|_| "Wazuh relay configuration is invalid")?;
+    let wazuh_task = match wazuh_adapter {
+        Some(poller) => {
             eprintln!("jarvis-core Wazuh security poller enabled");
             Some(tokio::spawn(
                 poller.run_until(transport.event_bus(), std::future::pending()),
             ))
         }
-        _ => {
+        None => {
             eprintln!("jarvis-core Wazuh security poller disabled: JARVIS_WAZUH_RELAY_URL is not configured");
             None
         }
@@ -195,7 +205,39 @@ async fn run() -> Result<(), &'static str> {
     }
     agent_health_task.abort();
     let _ = agent_health_task.await;
+    if let Some(task) = outbox_task {
+        task.abort();
+        let _ = task.await;
+    }
     result
+}
+
+fn load_wazuh_adapter() -> Result<Option<WazuhSecurityPoller>, &'static str> {
+    let Some(value) = env::var("JARVIS_WAZUH_RELAY_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    let url = value
+        .parse()
+        .map_err(|_| "JARVIS_WAZUH_RELAY_URL is invalid")?;
+    WazuhSecurityPoller::new(url, load_secret("wazuh-relay-token", 32)?)
+        .map(Some)
+        .map_err(|_| "Wazuh relay configuration is invalid")
+}
+
+async fn load_core_outbox_store() -> Result<Option<CoreOutboxStore>, &'static str> {
+    let Some(url) = env::var("JARVIS_CORE_DATABASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    CoreOutboxStore::connect(&url, &load_secret(CORE_DATABASE_CREDENTIAL_NAME, 32)?)
+        .await
+        .map(Some)
+        .map_err(|_| "Core outbox database configuration or connection failed")
 }
 
 fn load_knowledge_client() -> Result<Option<KnowledgeClient>, &'static str> {

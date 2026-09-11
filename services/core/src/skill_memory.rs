@@ -36,11 +36,22 @@ pub enum SkillMemoryError {
     InvalidResponse,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskOutcomeProvenance {
+    pub kind: String,
+    pub adapter: String,
+    pub response_schema: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommittedTaskOutcomeRecord {
     pub schema_version: String,
     pub source_event_id: String,
     pub source_audit_id: String,
+    pub source_request_id: String,
+    pub subject: String,
     pub task_type: String,
     pub context_summary: String,
     pub approach: String,
@@ -48,6 +59,7 @@ pub struct CommittedTaskOutcomeRecord {
     pub capability_tier: u8,
     pub executor_verified: bool,
     pub human_authorization_audit_id: Option<String>,
+    pub provenance: TaskOutcomeProvenance,
     pub created_at: String,
     pub committed_at_epoch_seconds: u64,
 }
@@ -77,15 +89,20 @@ impl VerifiedTaskOutcome {
             || !valid_task_type(&record.task_type)
             || !valid_identifier(&record.source_event_id, 160)
             || !valid_identifier(&record.source_audit_id, 160)
+            || !valid_identifier(&record.source_request_id, 160)
+            || !valid_identifier(&record.subject, 160)
             || !valid_identifier(&record.capability, 160)
             || !(1..=3).contains(&record.capability_tier)
-            || catalog_tier(&record.capability) != Some(record.capability_tier)
             || catalog_tier(&record.capability) != Some(record.capability_tier)
             || (record.capability_tier >= 2 && !human_confirmed)
             || record
                 .human_authorization_audit_id
                 .as_deref()
                 .is_some_and(|value| !valid_identifier(value, 160))
+            || !valid_identifier(&record.provenance.adapter, 96)
+            || !valid_identifier(&record.provenance.response_schema, 96)
+            || (record.capability_tier == 1 && record.provenance.kind != "validated_read_adapter")
+            || (record.capability_tier >= 2 && record.provenance.kind != "restricted_executor")
             || !valid_text(&record.context_summary, 2 * 1024)
             || !valid_text(&record.approach, 4 * 1024)
             || !valid_text(&record.created_at, 64)
@@ -458,6 +475,8 @@ mod tests {
             schema_version: "task_outcome.verified.v1".into(),
             source_event_id: "event-verified-1".into(),
             source_audit_id: "audit-verified-1".into(),
+            source_request_id: "request-verified-1".into(),
+            subject: "operator".into(),
             task_type: "wazuh_alert_triage".into(),
             context_summary: "Alertas correlacionadas por host".into(),
             approach: "Agrupar por host antes de evaluar severidad".into(),
@@ -465,6 +484,16 @@ mod tests {
             capability_tier: tier,
             executor_verified: true,
             human_authorization_audit_id: authorization.map(str::to_owned),
+            provenance: TaskOutcomeProvenance {
+                kind: if tier == 1 {
+                    "validated_read_adapter"
+                } else {
+                    "restricted_executor"
+                }
+                .into(),
+                adapter: "test-adapter".into(),
+                response_schema: "test.response.v1".into(),
+            },
             created_at: "2026-09-11T12:00:00-03:00".into(),
             committed_at_epoch_seconds: 1_789_136_400,
         }

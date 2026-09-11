@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.example.internal/contracts/events/task-outcome-verified.v1.schema.json",
+  "title": "Verified task outcome v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "source_event_id", "source_audit_id", "source_request_id",
+    "subject", "task_type", "context_summary", "approach", "capability",
+    "capability_tier", "executor_verified", "provenance", "created_at",
+    "committed_at_epoch_seconds"
+  ],
+  "properties": {
+    "schema_version": { "const": "task_outcome.verified.v1" },
+    "source_event_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "source_audit_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "source_request_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "subject": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "task_type": { "type": "string", "pattern": "^[a-z0-9_]{1,96}$" },
+    "context_summary": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "approach": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "capability": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "capability_tier": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "executor_verified": { "const": true },
+    "human_authorization_audit_id": {
+      "type": ["string", "null"], "minLength": 1, "maxLength": 160
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "adapter", "response_schema"],
+      "properties": {
+        "kind": { "enum": ["validated_read_adapter", "restricted_executor"] },
+        "adapter": { "type": "string", "minLength": 1, "maxLength": 96 },
+        "response_schema": { "type": "string", "minLength": 1, "maxLength": 96 }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time", "maxLength": 64 },
+    "committed_at_epoch_seconds": { "type": "integer", "minimum": 1 }
+  }
+}

@@ -21,6 +21,8 @@ mod skill_memory;
 mod soc;
 #[cfg(feature = "network-server")]
 mod soc_cases;
+#[cfg(feature = "network-server")]
+mod task_outbox;
 mod telemetry;
 mod transport;
 mod validation;
@@ -59,13 +61,13 @@ pub use routing::{
     DeterministicCapabilityRouter, ModelDecision, ModelPurpose, RequestSource, RoutingDecision,
 };
 #[cfg(feature = "network-server")]
-pub use security::WazuhSecurityPoller;
+pub use security::{VerifiedWazuhRead, WazuhReadFilter, WazuhSecurityPoller};
 pub use session::{
     IssuedSession, SessionConfigError, SessionIssueError, SessionStore, DEFAULT_MAX_SESSIONS,
     DEFAULT_SESSION_TTL, MAX_SESSIONS, SESSION_COOKIE_NAME,
 };
 #[cfg(feature = "network-server")]
-pub use skill_memory::{CommittedTaskOutcomeRecord, VerifiedTaskOutcome};
+pub use skill_memory::{CommittedTaskOutcomeRecord, TaskOutcomeProvenance, VerifiedTaskOutcome};
 #[cfg(feature = "network-server")]
 pub use skill_memory::{SkillMemoryClient, SkillMemoryConfig, SkillMemoryError};
 pub use soc::{
@@ -77,6 +79,11 @@ pub use soc::{
 };
 #[cfg(feature = "network-server")]
 pub use soc_cases::SocCaseStore;
+#[cfg(feature = "network-server")]
+pub use task_outbox::{
+    run_skill_outbox_until, ClaimedOutboxEvent, CoreOutboxStore, DurableAuditEvent, OutboxError,
+    TierOneSkillConsumer,
+};
 #[cfg(feature = "network-server")]
 pub use telemetry::{run_prometheus_availability_until, PrometheusTelemetryAdapter};
 pub use telemetry::{

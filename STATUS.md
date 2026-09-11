@@ -1,6 +1,6 @@
 # JARVIS status at the ADR-014 baseline
 
-Repository baseline: `origin/main@a2f37e0` (2026-08-12).
+Repository baseline: `origin/main@72ac17b` (2026-09-11).
 
 This status separates repository evidence from production evidence. A passing
 test proves the implementation at the baseline; it does not prove deployment.
@@ -50,6 +50,7 @@ that check.
 | Router-authoritative text/voice, RAG and model fallback | `router_alias_is_preserved_without_qdrant_context`, `qdrant_context_does_not_override_router_alias`, `router_owns_codex_fallback_and_cross_domain_model_decisions`, `conversation_and_transport_do_not_fix_model_aliases` | `0184eaf`, merge `17049f0`; not deployed |
 | Read-only governed skill memory | `skill_memory_enriches_context_without_overriding_router_alias`, `renders_only_bounded_active_matching_skills`, `documentary_collection_cannot_be_reused` | `26a14be`, merge `17049f0`; not deployed |
 | Verified-outcome skill write boundary | `verified_outcome_requires_durable_execution_and_tier_authorization`, `point_identifier_is_stable_and_qdrant_compatible` | `af6b39f`, merge `17049f0`; boundary only, no runtime producer, not deployed |
+| Phase 1.5 Tier 1 durable skill pipeline | `real_wazuh_read_path_validates_and_returns_only_typed_counts`, `tier_one_policy_accepts_only_curated_wazuh_records`, `tier_two_and_three_are_explicitly_disabled_before_writing`, `tier_one_write_is_idempotent_and_retrievable` | `feature/tier1-skill-outbox`; PR pending, not deployed |
 | Fail-closed execution boundary | `protected_actions_stop_at_authorization_boundary`, `unverified_executor_result_fails_closed`, `unknown_capabilities_are_denied_by_default` | baseline `a2f37e0` |
 
 These tests generate in-memory `audit_id` values where applicable. They are not
@@ -70,8 +71,8 @@ production audit records and are not represented as such.
 | Capability-specific restricted write executors | Not implemented or enabled |
 | Reproducible release and rollback | Not implemented |
 | HUD typed Tier 3 confirmation | Not implemented |
-| Durable `task_outcome.verified.v1` producer/outbox | Not implemented; skill writes remain disconnected and fail-closed |
-| Skill memory production collection/credential/deployment | Not configured or verified |
+| Durable `task_outcome.verified.v1` producer/outbox | Implemented for validated Wazuh Tier 1 reads on `feature/tier1-skill-outbox`; dedicated Core PostgreSQL provisioning, migration and live deployment remain pending. Tier 2/3 are explicitly rejected |
+| Skill memory production collection/credential/deployment | Not configured or verified; live Wazuh → Core DB → Qdrant validation must run only after reviewed merge and deployment |
 
 ## Trabajo pendiente de reconciliar
 

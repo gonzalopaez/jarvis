@@ -80,7 +80,9 @@ The sole automatic write input is `task_outcome.verified.v1`, durably committed
 by Core after all of these facts are known:
 
 1. the capability exists in the catalog and its tier is recorded;
-2. the restricted executor returned `verified=true` for the exact request;
+2. for Tier 1, a Core-owned read adapter completed the exact request and its
+   bounded typed response passed adapter validation; for Tier 2/3, the
+   restricted executor returned `verified=true` for the exact request;
 3. the reusable approach and context summary passed bounds and redaction;
 4. Tier 1 records identify the authenticated initiating subject; and
 5. Tier 2/3 records reference a durable human authorization for the same
@@ -93,9 +95,30 @@ model self-reports, successful HTTP status, proposals, grants without verified
 execution, and analyst verdicts without a matching executed capability are not
 valid learning signals.
 
-The current disabled executor cannot produce this signal. Therefore this stage
-implements the validated writer boundary but does not connect it to ordinary
-conversation completion or enable production writes.
+For Tier 1, transport success alone is insufficient: the adapter must reject
+oversized, malformed, unauthenticated or semantically invalid responses. Core
+constructs `context_summary` and `approach` from reviewed templates and typed
+fields; agent/model-authored prose is never promoted into either field.
+
+Tier 1 verified outcomes may therefore be produced without passing through
+`RestrictedExecutor`. Tier 2/3 outcomes continue to require that executor plus
+the matching durable human authorization. The disabled production executor
+cannot produce Tier 2/3 learning signals.
+
+### Durable audit and outbox
+
+Core commits the audit row and `task_outcome.verified.v1` outbox row in one
+PostgreSQL transaction in Core-owned tables, separate from `jarvis_soc` domain
+tables. The event contains the source request/audit identity, authenticated
+subject, capability and catalog tier, bounded task type, template-derived
+context and approach, adapter provenance, creation time and commit time.
+
+The outbox event identifier is unique. Consumers claim pending rows with
+`FOR UPDATE SKIP LOCKED`, apply bounded exponential backoff, and mark delivery
+only after Qdrant confirms the idempotent point upsert. Failures are durably
+audited but are not valid `task_outcome.verified.v1` inputs and never create
+skills. Phase 1.5 additionally enforces Tier 1 in the consumer policy before
+the generic verified-outcome writer; Tier 2/3 remain fail-closed.
 
 ### Retention and revocation
 
@@ -114,8 +137,8 @@ must be redacted before the durable event is committed.
 
 - Qdrant remains a derived retrieval index, not the system of record.
 - Read-only skill retrieval can ship while writes remain fail-closed.
-- Enabling automatic learning requires a durable Core audit/outbox schema and a
-  restricted executor; neither is smuggled into this change.
+- Tier 1 automatic learning requires the durable Core audit/outbox and a typed,
+  validating read adapter. Tier 2/3 additionally require RestrictedExecutor.
 - Human confirmation cannot be inferred from capability tier or response text.
 - Fine-tuning and weight changes remain outside this ADR.
 

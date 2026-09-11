@@ -9,6 +9,7 @@ publish = false
 default = []
 integration-tests = []
 network-server = [
+  "dep:chrono",
   "dep:futures-util",
   "dep:hyper-tungstenite",
   "hyper/http1",
@@ -26,6 +27,7 @@ path = "src/main.rs"
 required-features = ["network-server"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
 bytes = "1"
 http = "1"
 http-body = "1"

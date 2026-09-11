@@ -81,9 +81,11 @@ Core can also retrieve bounded reusable experience from the separate
 the Capability Router selects a model. Enable it with the
 `JARVIS_SKILL_MEMORY_*` variables and a systemd credential named
 `skill-memory-embeddings-token`; add that `LoadCredential` entry through a
-deployment drop-in only when the optional feature is enabled. Automatic writes
-remain disconnected until Core has the durable verified-outcome producer
-defined by `docs/adr/ADR-015-skill-memory-layer.md`.
+deployment drop-in only when the optional feature is enabled. Tier 1 writes
+additionally require a dedicated non-SOC PostgreSQL database configured through
+`JARVIS_CORE_DATABASE_URL`, migrated explicitly with `scripts/core-migrate.sh`,
+and a `core-database-password` systemd credential. Core never migrates schemas
+at startup; the outbox stays disabled when the database URL is absent.
 
 WebSocket startup additionally requires `JARVIS_WEB_ORIGIN` as one exact HTTPS origin without a trailing slash. The gateway fails closed when missing, rejects anonymous or cross-origin upgrades and does not provide a browser authentication bypass.
 
