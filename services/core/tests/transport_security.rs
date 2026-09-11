@@ -133,7 +133,7 @@ async fn versioned_health_reports_real_and_unavailable_components() {
     assert_eq!(body["api_version"], "v1");
     assert_eq!(body["status"], "degraded");
     assert_eq!(body["state"], "IDLE");
-    assert_eq!(body["components"].as_array().expect("components").len(), 8);
+    assert_eq!(body["components"].as_array().expect("components").len(), 7);
     assert_eq!(body["components"][0]["id"], "core");
     assert_eq!(body["components"][0]["status"], "healthy");
     assert_eq!(body["components"][1]["status"], "unavailable");
@@ -162,7 +162,7 @@ async fn agent_inventory_requires_authentication() {
         .await;
     assert_eq!(authenticated.status(), StatusCode::OK);
     let body = body_json(authenticated).await;
-    assert_eq!(body["agents"].as_array().expect("agents").len(), 8);
+    assert_eq!(body["agents"].as_array().expect("agents").len(), 7);
 }
 
 #[tokio::test]

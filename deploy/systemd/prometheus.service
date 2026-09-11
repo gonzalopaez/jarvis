@@ -8,6 +8,8 @@ Requires=nftables.service
 Type=simple
 User=prometheus
 Group=prometheus
+# Keep block retention well below the CT filesystem size. WAL, head chunks,
+# compaction workspace and the operating system are outside this budget.
 ExecStart=/usr/local/bin/prometheus \
     --config.file=/etc/prometheus/prometheus.yml \
     --storage.tsdb.path=/var/lib/prometheus/ \

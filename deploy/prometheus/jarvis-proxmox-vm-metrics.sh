@@ -2,11 +2,12 @@
 # JARVIS Proxmox guest/service telemetry for Prometheus.
 #
 # Runs on the Proxmox host as a oneshot triggered by jarvis-proxmox-vm-metrics.timer.
-# Writes a node-exporter textfile collector file with two gauges consumed by the
+# Writes a node-exporter textfile collector file with gauges consumed by the
 # Core telemetry adapter (services/core/src/telemetry.rs):
 #
 #   jarvis_proxmox_guest_up    1 when the guest is running, else 0
 #   jarvis_proxmox_service_up  1 when the critical guest service is active, else 0
+#   jarvis_gpu_passthrough_ok  1 when CT 116 has a real GPU render device, else 0
 #
 # Read-only: it only calls `pct status` / `qm status` and `systemctl is-active`.
 # See docs/adr/ADR-011-proxmox-textfile-exporter.md for the rationale.
@@ -37,6 +38,10 @@ SERVICES="101|adguard|AdGuardHome 105|cloudflare-tunnel|cloudflared 109|tailscal
     if pct status "$vmid" 2>/dev/null | grep -q running && pct exec "$vmid" -- systemctl is-active --quiet "$service" 2>/dev/null; then value=1; else value=0; fi
     printf "jarvis_proxmox_service_up{vmid=\"%s\",name=\"%s\",service=\"%s\"} %s\\n" "$vmid" "$name" "$service" "$value"
   done
+  echo "# HELP jarvis_gpu_passthrough_ok Whether the Ollama LXC has a real GPU render character device."
+  echo "# TYPE jarvis_gpu_passthrough_ok gauge"
+  if pct status 116 2>/dev/null | grep -q running && pct exec 116 -- test -c /dev/dri/renderD129 2>/dev/null; then value=1; else value=0; fi
+  printf 'jarvis_gpu_passthrough_ok{vmid="116"} %s\n' "$value"
 } > "$tmp"
 
 chown root:prometheus "$tmp"

@@ -240,12 +240,12 @@ function parseSourceStatus(payload: unknown): ComponentHealth | null {
   const source = (payload as { source?: unknown }).source;
   const status = (payload as { status?: unknown }).status;
   if (typeof source !== "string" || typeof status !== "string") return null;
-  const id = source === "prometheus" ? "monitor" : source === "wazuh" ? "security" : null;
-  if (!id) return null;
+  if (source !== "wazuh") return null;
+  const id = "wazuh";
   const healthy = status === "healthy";
   return {
     id,
-    label: id === "monitor" ? "SYSTEM MONITOR" : "SECURITY AGENT",
+    label: "WAZUH AGENT",
     status: healthy ? "healthy" : "unavailable",
     agentStatus: healthy ? "realtime" : "offline",
     version: "adapter",

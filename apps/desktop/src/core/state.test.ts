@@ -2,6 +2,35 @@ import { describe, expect, it } from "vitest";
 import { JarvisStore } from "./state";
 
 describe("JarvisStore", () => {
+  it("starts with the real 7-agent roster and no placeholder-only agents", () => {
+    const store = new JarvisStore();
+    const ids = store.snapshot().agents.map((agent) => agent.id);
+    expect(ids).toEqual(["core", "codex", "voice", "mcp", "n8n", "wazuh", "proxmox"]);
+    expect(ids).not.toContain("memory");
+    expect(ids).not.toContain("monitor");
+    expect(ids).not.toContain("security");
+  });
+
+  it("marks Proxmox Agent as not instrumented rather than faking a live check", () => {
+    const store = new JarvisStore();
+    const proxmox = store.snapshot().agents.find((agent) => agent.id === "proxmox");
+    expect(proxmox?.detail).toBe("NOT INSTRUMENTED");
+  });
+
+  it("updates the Wazuh Agent tile from a real agent.status.changed event", () => {
+    const store = new JarvisStore();
+    store.bus.emit("realtime.agent.changed", {
+      id: "wazuh",
+      label: "WAZUH AGENT",
+      status: "healthy",
+      agentStatus: "realtime",
+      version: "adapter",
+    });
+    const wazuh = store.snapshot().agents.find((agent) => agent.id === "wazuh");
+    expect(wazuh?.state).toBe("realtime");
+    expect(wazuh?.simulated).toBe(false);
+  });
+
   it("uses the normalized operational state model", () => {
     const store = new JarvisStore();
     store.setState("executing", true);

@@ -22,13 +22,17 @@ producer, so scraping the Core for application metrics was not an option.
 
 ## Decision
 
-Emit both gauges from the **Proxmox host** through the node-exporter **textfile
+Emit the host-derived gauges from the **Proxmox host** through the node-exporter **textfile
 collector**, not through a new standalone exporter.
 
 - `/usr/local/sbin/jarvis-proxmox-vm-metrics` (`deploy/prometheus/jarvis-proxmox-vm-metrics.sh`)
   reads guest state with `pct status` / `qm status` and service state with
   `pct exec <vmid> -- systemctl is-active`, then atomically writes
   `/var/lib/node_exporter/textfile_collector/proxmox_vm_status.prom`.
+- For the Ollama LXC, the same collector publishes
+  `jarvis_gpu_passthrough_ok{vmid="116"}`. It is `1` only when
+  `/dev/dri/renderD129` is a real character device inside the container, so a
+  failed or stale GPU bind mount is observable after a host or container boot.
 - A oneshot unit + timer (`deploy/systemd/jarvis-proxmox-vm-metrics.{service,timer}`)
   refresh it every 15s.
 - The host node-exporter already runs with
@@ -49,7 +53,7 @@ collector**, not through a new standalone exporter.
 
 ## Consequences
 
-- No new open port, no new firewall rule, no new Prometheus job: the two gauges
+- No new open port, no new firewall rule, no new Prometheus job: the gauges
   appear on the existing `server-central` node-exporter target.
 - The metric surface is read-only (`pct status`, `qm status`, `systemctl
   is-active`); it never mutates guests.

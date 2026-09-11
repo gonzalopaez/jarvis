@@ -1,0 +1,15 @@
+groups:
+  - name: jarvis-storage
+    rules:
+      - alert: JarvisPrometheusDiskSpaceLow
+        expr: |
+          node_filesystem_avail_bytes{instance="192.168.1.24:9100",mountpoint="/"}
+          /
+          node_filesystem_size_bytes{instance="192.168.1.24:9100",mountpoint="/"}
+          < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Prometheus CT127 root filesystem has less than 15% free
+          description: Prometheus TSDB compaction is at risk before the filesystem reaches 100%.

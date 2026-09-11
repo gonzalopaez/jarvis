@@ -189,7 +189,7 @@ function validateHealth(candidate: unknown): HealthEnvelope {
     || !["healthy", "degraded", "unavailable"].includes(health.status ?? "")
     || !isJarvisState(health.state)
     || !Array.isArray(health.components)
-    || health.components.length !== 8
+    || health.components.length !== 7
     || health.components.some((component) => !isComponent(component))
   ) {
     throw new Error("Core health response is invalid");
