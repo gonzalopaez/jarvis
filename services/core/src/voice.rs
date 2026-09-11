@@ -87,7 +87,7 @@ struct SynthesisRequest<'a> {
 impl VoicePipeline {
     pub fn new(config: VoicePipelineConfig) -> Result<Self, VoicePipelineError> {
         if config.voice_base_url.scheme() != "http"
-            || config.litellm_base_url.scheme() != "http"
+            || !matches!(config.litellm_base_url.scheme(), "http" | "https")
             || config.voice_token.len() < 32
             || config.litellm_token.len() < 20
             || config.model.trim().is_empty()

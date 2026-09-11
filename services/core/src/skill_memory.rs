@@ -166,7 +166,7 @@ struct SkillPayload {
 
 impl SkillMemoryClient {
     pub fn new(config: SkillMemoryConfig) -> Result<Self, SkillMemoryError> {
-        if config.litellm_base_url.scheme() != "http"
+        if !matches!(config.litellm_base_url.scheme(), "http" | "https")
             || config.qdrant_base_url.scheme() != "http"
             || config.litellm_token.len() < 20
             || config.embedding_model.trim().is_empty()
