@@ -1,6 +1,7 @@
 use reqwest::{Client, Url};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DOCUMENT_KNOWLEDGE_COLLECTION: &str = "jarvis_knowledge_bge_v1";
@@ -9,6 +10,8 @@ const MAX_UPSTREAM_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CONTEXT_BYTES: usize = 8 * 1024;
 const MAX_VECTOR_DIMENSIONS: usize = 8 * 1024;
 const MAX_RESULTS: usize = 3;
+const SKILL_RETENTION_SECONDS: u64 = 180 * 24 * 60 * 60;
+const CAPABILITIES_JSON: &str = include_str!("../../../contracts/data/capabilities.json");
 
 #[derive(Clone)]
 pub struct SkillMemoryClient {
@@ -33,6 +36,77 @@ pub enum SkillMemoryError {
     InvalidResponse,
 }
 
+#[derive(Debug, Clone)]
+pub struct CommittedTaskOutcomeRecord {
+    pub schema_version: String,
+    pub source_event_id: String,
+    pub source_audit_id: String,
+    pub task_type: String,
+    pub context_summary: String,
+    pub approach: String,
+    pub capability: String,
+    pub capability_tier: u8,
+    pub executor_verified: bool,
+    pub human_authorization_audit_id: Option<String>,
+    pub created_at: String,
+    pub committed_at_epoch_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedTaskOutcome {
+    source_event_id: String,
+    source_audit_id: String,
+    task_type: String,
+    context_summary: String,
+    approach: String,
+    capability: String,
+    capability_tier: u8,
+    human_confirmed: bool,
+    created_at: String,
+    created_at_epoch_seconds: u64,
+}
+
+impl VerifiedTaskOutcome {
+    pub fn from_committed_record(
+        record: CommittedTaskOutcomeRecord,
+    ) -> Result<Self, SkillMemoryError> {
+        let human_confirmed = record.human_authorization_audit_id.is_some();
+        if record.schema_version != "task_outcome.verified.v1"
+            || !record.executor_verified
+            || record.committed_at_epoch_seconds == 0
+            || !valid_task_type(&record.task_type)
+            || !valid_identifier(&record.source_event_id, 160)
+            || !valid_identifier(&record.source_audit_id, 160)
+            || !valid_identifier(&record.capability, 160)
+            || !(1..=3).contains(&record.capability_tier)
+            || catalog_tier(&record.capability) != Some(record.capability_tier)
+            || catalog_tier(&record.capability) != Some(record.capability_tier)
+            || (record.capability_tier >= 2 && !human_confirmed)
+            || record
+                .human_authorization_audit_id
+                .as_deref()
+                .is_some_and(|value| !valid_identifier(value, 160))
+            || !valid_text(&record.context_summary, 2 * 1024)
+            || !valid_text(&record.approach, 4 * 1024)
+            || !valid_text(&record.created_at, 64)
+        {
+            return Err(SkillMemoryError::InvalidResponse);
+        }
+        Ok(Self {
+            source_event_id: record.source_event_id,
+            source_audit_id: record.source_audit_id,
+            task_type: record.task_type,
+            context_summary: record.context_summary,
+            approach: record.approach,
+            capability: record.capability,
+            capability_tier: record.capability_tier,
+            human_confirmed,
+            created_at: record.created_at,
+            created_at_epoch_seconds: record.committed_at_epoch_seconds,
+        })
+    }
+}
+
 #[derive(Deserialize)]
 struct EmbeddingResponse {
     data: Vec<EmbeddingData>,
@@ -54,7 +128,7 @@ struct SkillHit {
     payload: SkillPayload,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SkillPayload {
     schema_version: String,
@@ -142,6 +216,58 @@ impl SkillMemoryClient {
         }
         let body: SearchResponse = bounded_json(response).await?;
         render_context(body.result, task_type, now)
+    }
+
+    pub async fn write_verified(
+        &self,
+        outcome: &VerifiedTaskOutcome,
+    ) -> Result<(), SkillMemoryError> {
+        let retrieval_document = format!(
+            "{}\n{}\n{}",
+            outcome.task_type, outcome.context_summary, outcome.approach
+        );
+        let vector = self.embed(&retrieval_document).await?;
+        let skill_id = deterministic_point_id(&outcome.source_event_id);
+        let expires_at_epoch_seconds = outcome
+            .created_at_epoch_seconds
+            .checked_add(SKILL_RETENTION_SECONDS)
+            .ok_or(SkillMemoryError::InvalidResponse)?;
+        let payload = SkillPayload {
+            schema_version: "jarvis.skill.v1".into(),
+            skill_id: skill_id.clone(),
+            task_type: outcome.task_type.clone(),
+            context_summary: outcome.context_summary.clone(),
+            approach: outcome.approach.clone(),
+            outcome: "success".into(),
+            capability: outcome.capability.clone(),
+            capability_tier: outcome.capability_tier,
+            human_confirmed: outcome.human_confirmed,
+            source_event_id: outcome.source_event_id.clone(),
+            source_audit_id: outcome.source_audit_id.clone(),
+            created_at: outcome.created_at.clone(),
+            expires_at_epoch_seconds,
+            revoked: false,
+        };
+        let url = self
+            .config
+            .qdrant_base_url
+            .join(&format!(
+                "collections/{}/points?wait=true",
+                self.config.collection
+            ))
+            .map_err(|_| SkillMemoryError::InvalidConfiguration)?;
+        let response = self
+            .client
+            .put(url)
+            .json(&json!({"points": [{"id": skill_id, "vector": vector, "payload": payload}]}))
+            .send()
+            .await
+            .map_err(|_| SkillMemoryError::Unavailable)?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(SkillMemoryError::Unavailable)
+        }
     }
 
     async fn embed(&self, query: &str) -> Result<Vec<f32>, SkillMemoryError> {
@@ -272,6 +398,32 @@ fn contains_secret_shape(value: &str) -> bool {
     .any(|marker| lower.contains(marker))
 }
 
+fn catalog_tier(capability: &str) -> Option<u8> {
+    let entries: serde_json::Value = serde_json::from_str(CAPABILITIES_JSON).ok()?;
+    entries.as_array()?.iter().find_map(|entry| {
+        (entry.get("capability")?.as_str()? == capability)
+            .then(|| {
+                entry
+                    .get("tier")?
+                    .as_u64()
+                    .and_then(|tier| u8::try_from(tier).ok())
+            })
+            .flatten()
+    })
+}
+
+fn deterministic_point_id(source_event_id: &str) -> String {
+    let digest = hex::encode(Sha256::digest(source_event_id.as_bytes()));
+    format!(
+        "{}-{}-{}-{}-{}",
+        &digest[0..8],
+        &digest[8..12],
+        &digest[12..16],
+        &digest[16..20],
+        &digest[20..32]
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,6 +444,29 @@ mod tests {
             created_at: "2026-09-11T12:00:00-03:00".into(),
             expires_at_epoch_seconds: 2_000_000_000,
             revoked: false,
+        }
+    }
+
+    fn committed_record(tier: u8, authorization: Option<&str>) -> CommittedTaskOutcomeRecord {
+        let capability = match tier {
+            1 => "wazuh.alerts.read",
+            2 => "security.ip.block",
+            3 => "proxmox.vm.deploy",
+            _ => "unsupported",
+        };
+        CommittedTaskOutcomeRecord {
+            schema_version: "task_outcome.verified.v1".into(),
+            source_event_id: "event-verified-1".into(),
+            source_audit_id: "audit-verified-1".into(),
+            task_type: "wazuh_alert_triage".into(),
+            context_summary: "Alertas correlacionadas por host".into(),
+            approach: "Agrupar por host antes de evaluar severidad".into(),
+            capability: capability.into(),
+            capability_tier: tier,
+            executor_verified: true,
+            human_authorization_audit_id: authorization.map(str::to_owned),
+            created_at: "2026-09-11T12:00:00-03:00".into(),
+            committed_at_epoch_seconds: 1_789_136_400,
         }
     }
 
@@ -341,5 +516,32 @@ mod tests {
             SkillMemoryClient::new(config),
             Err(SkillMemoryError::InvalidConfiguration)
         ));
+    }
+
+    #[test]
+    fn verified_outcome_requires_durable_execution_and_tier_authorization() {
+        let mut unverified = committed_record(1, None);
+        unverified.executor_verified = false;
+        assert_eq!(
+            VerifiedTaskOutcome::from_committed_record(unverified),
+            Err(SkillMemoryError::InvalidResponse)
+        );
+        assert_eq!(
+            VerifiedTaskOutcome::from_committed_record(committed_record(2, None)),
+            Err(SkillMemoryError::InvalidResponse)
+        );
+        assert!(VerifiedTaskOutcome::from_committed_record(committed_record(
+            2,
+            Some("authorization-audit-1")
+        ))
+        .is_ok());
+    }
+
+    #[test]
+    fn point_identifier_is_stable_and_qdrant_compatible() {
+        let first = deterministic_point_id("event-verified-1");
+        assert_eq!(first, deterministic_point_id("event-verified-1"));
+        assert_eq!(first.len(), 36);
+        assert_eq!(first.chars().filter(|value| *value == '-').count(), 4);
     }
 }
