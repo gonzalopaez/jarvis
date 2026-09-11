@@ -47,9 +47,9 @@ that check.
 | Wazuh Agent bounded triage and proposal forwarding | `test_l2_triage_has_explicit_timeout_and_bounded_context`, `test_proposal_reaches_core_as_action_and_is_not_executed_by_agent` | `45aa91d`, merge `199037a` |
 | Proxmox Agent proposal-only Tier 3 interface | `test_all_tier_3_capabilities_are_exposed_and_nothing_else`, `test_destroy_is_only_proposed_to_core_with_explicit_timeout` | `0c4b3dd`, merge `4131336` |
 | Cross-domain parallel evidence fan-out | `cross_domain_evidence_uses_parallel_agents_route`, `cross_domain_evidence_is_requested_concurrently`, `audit_ids_remain_unique_during_concurrent_fan_out` | `5d507e2`, `e1ab502`, merge `a2f37e0` |
-| Router-authoritative text/voice, RAG and model fallback | `router_alias_is_preserved_without_qdrant_context`, `qdrant_context_does_not_override_router_alias`, `router_owns_codex_fallback_and_cross_domain_model_decisions`, `conversation_and_transport_do_not_fix_model_aliases` | `0184eaf` plus final branch reconciliation; not deployed |
-| Read-only governed skill memory | `skill_memory_enriches_context_without_overriding_router_alias`, `renders_only_bounded_active_matching_skills`, `documentary_collection_cannot_be_reused` | `26a14be`; branch only, not deployed |
-| Verified-outcome skill write boundary | `verified_outcome_requires_durable_execution_and_tier_authorization`, `point_identifier_is_stable_and_qdrant_compatible` | `af6b39f`; boundary only, no runtime producer, not deployed |
+| Router-authoritative text/voice, RAG and model fallback | `router_alias_is_preserved_without_qdrant_context`, `qdrant_context_does_not_override_router_alias`, `router_owns_codex_fallback_and_cross_domain_model_decisions`, `conversation_and_transport_do_not_fix_model_aliases` | `0184eaf`, merge `17049f0`; not deployed |
+| Read-only governed skill memory | `skill_memory_enriches_context_without_overriding_router_alias`, `renders_only_bounded_active_matching_skills`, `documentary_collection_cannot_be_reused` | `26a14be`, merge `17049f0`; not deployed |
+| Verified-outcome skill write boundary | `verified_outcome_requires_durable_execution_and_tier_authorization`, `point_identifier_is_stable_and_qdrant_compatible` | `af6b39f`, merge `17049f0`; boundary only, no runtime producer, not deployed |
 | Fail-closed execution boundary | `protected_actions_stop_at_authorization_boundary`, `unverified_executor_result_fails_closed`, `unknown_capabilities_are_denied_by_default` | baseline `a2f37e0` |
 
 These tests generate in-memory `audit_id` values where applicable. They are not
@@ -91,10 +91,10 @@ production audit records and are not represented as such.
   merged as a unit. Their unrelated scope must continue through separate audit
   and merge stages; the historical GPU commit on that branch is superseded by
   the reconciled v2 hook and configuration in this branch.
-- `feature/qdrant-infra-rag` is not merged. Its ADR-013 RAG decision has been
-  reconciled with the multi-agent architecture; the obsolete, conflicting
-  `ADR-014-prometheus-live-agent-context.md` direct-rendering path was dropped.
-  Expanded indexing and parallel static/live evidence remain separate work.
+- `feature/qdrant-infra-rag` and the governed skill-memory stages were merged
+  through PR #6 as `17049f0`. Qdrant reindexing, creation of
+  `jarvis_skill_memory_v1`, delivery of its credential and Core deployment
+  remain pending; no production activation is inferred from the merge.
 - The `apps/desktop` Agent Matrix now shows the real roster (Voice Service,
   MCP Gateway, n8n, Wazuh Agent, Proxmox Agent) with live polling for
   Voice/MCP/n8n and a permanent `NOT INSTRUMENTED` state for Proxmox Agent
