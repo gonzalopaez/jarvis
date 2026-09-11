@@ -2,7 +2,7 @@ use crate::KnowledgeClient;
 use crate::{
     AiMode, CapabilityRequest, CapabilityRoute, CapabilityRouter, CoreRequest, CoreResponse,
     DeterministicCapabilityRouter, EventBus, EventType, ModelDecision, ModelPurpose, RequestSource,
-    ResponseStatus, RoutingDecision, API_VERSION,
+    ResponseStatus, RoutingDecision, SkillMemoryClient, API_VERSION,
 };
 use reqwest::{Client, Url};
 use serde::Deserialize;
@@ -48,6 +48,20 @@ impl ConversationModel for VoicePipeline {
 
 trait KnowledgeRetriever: Send + Sync {
     fn retrieve<'a>(&'a self, query: &'a str) -> KnowledgeFuture<'a>;
+}
+
+trait ExperienceRetriever: Send + Sync {
+    fn retrieve<'a>(&'a self, task_type: &'a str, query: &'a str) -> KnowledgeFuture<'a>;
+}
+
+impl ExperienceRetriever for SkillMemoryClient {
+    fn retrieve<'a>(&'a self, task_type: &'a str, query: &'a str) -> KnowledgeFuture<'a> {
+        Box::pin(async move {
+            SkillMemoryClient::retrieve(self, task_type, query)
+                .await
+                .map_err(|_| ())
+        })
+    }
 }
 
 impl KnowledgeRetriever for KnowledgeClient {
@@ -97,6 +111,7 @@ pub struct ConversationService {
     events: EventBus,
     pending_mitigation: OneTimeGrantStore<String>,
     knowledge: Option<Arc<dyn KnowledgeRetriever>>,
+    skill_memory: Option<Arc<dyn ExperienceRetriever>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -114,11 +129,17 @@ impl ConversationService {
             events,
             pending_mitigation: OneTimeGrantStore::new(MAX_PENDING_MITIGATIONS),
             knowledge: None,
+            skill_memory: None,
         }
     }
 
     pub fn with_knowledge(mut self, knowledge: KnowledgeClient) -> Self {
         self.knowledge = Some(Arc::new(knowledge));
+        self
+    }
+
+    pub fn with_skill_memory(mut self, skill_memory: SkillMemoryClient) -> Self {
+        self.skill_memory = Some(Arc::new(skill_memory));
         self
     }
 
@@ -131,6 +152,12 @@ impl ConversationService {
     #[cfg(test)]
     fn with_knowledge_retriever(mut self, knowledge: Arc<dyn KnowledgeRetriever>) -> Self {
         self.knowledge = Some(knowledge);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_experience_retriever(mut self, skill_memory: Arc<dyn ExperienceRetriever>) -> Self {
+        self.skill_memory = Some(skill_memory);
         self
     }
 
@@ -423,6 +450,11 @@ impl ConversationService {
             Some(knowledge) => knowledge.retrieve(message).await.ok().flatten(),
             None => None,
         };
+        let experience = match &self.skill_memory {
+            Some(memory) => memory.retrieve(route.intent, message).await.ok().flatten(),
+            None => None,
+        };
+        let context = combined_model_context(context, experience);
         let model = self
             .router
             .decide_model(route, ModelPurpose::RoutedResponse)
@@ -534,6 +566,25 @@ impl ConversationService {
             }
         }
     }
+}
+
+fn combined_model_context(knowledge: Option<String>, experience: Option<String>) -> Option<String> {
+    let sections = [
+        knowledge.map(|value| format!("CONOCIMIENTO DOCUMENTAL:\n{value}")),
+        experience.map(|value| format!("EXPERIENCIA REUTILIZABLE:\n{value}")),
+    ];
+    let mut output = String::new();
+    for section in sections.into_iter().flatten() {
+        let separator = usize::from(!output.is_empty()) * 2;
+        if output.len() + separator + section.len() > 12 * 1024 {
+            break;
+        }
+        if !output.is_empty() {
+            output.push_str("\n\n");
+        }
+        output.push_str(&section);
+    }
+    (!output.is_empty()).then_some(output)
 }
 
 fn normalize_security_query(value: &str) -> String {
@@ -764,6 +815,15 @@ mod tests {
         }
     }
 
+    struct StaticExperience(Option<String>);
+
+    impl ExperienceRetriever for StaticExperience {
+        fn retrieve<'a>(&'a self, _task_type: &'a str, _query: &'a str) -> KnowledgeFuture<'a> {
+            let result = self.0.clone();
+            Box::pin(async move { Ok(result) })
+        }
+    }
+
     fn service(events: EventBus) -> ConversationService {
         let voice = VoicePipeline::new(VoicePipelineConfig {
             voice_base_url: "http://voice.internal/".parse().expect("voice URL"),
@@ -819,9 +879,30 @@ mod tests {
             model.calls.lock().expect("recording model lock").as_slice(),
             &[(
                 "jarvis-fast".into(),
-                Some("FUENTE: [docs/test.md]\ncontexto".into())
+                Some("CONOCIMIENTO DOCUMENTAL:\nFUENTE: [docs/test.md]\ncontexto".into())
             )]
         );
+    }
+
+    #[tokio::test]
+    async fn skill_memory_enriches_context_without_overriding_router_alias() {
+        let model = Arc::new(RecordingModel::default());
+        let response = service(EventBus::default())
+            .with_model_client(model.clone())
+            .with_experience_retriever(Arc::new(StaticExperience(Some(
+                "EXPERIENCIA HISTÓRICA NO CONFIABLE [skill-1]".into(),
+            ))))
+            .handle(&request("session-skill", "Hola Jarvis"))
+            .await;
+
+        assert_eq!(response.status, ResponseStatus::Completed);
+        let calls = model.calls.lock().expect("recording model lock");
+        assert_eq!(calls[0].0, "jarvis-fast");
+        assert!(calls[0]
+            .1
+            .as_deref()
+            .expect("skill context")
+            .contains("EXPERIENCIA REUTILIZABLE"));
     }
 
     #[test]

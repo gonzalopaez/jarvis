@@ -3,8 +3,8 @@ use jarvis_core::{
     AgentHealthPoller, AuditEvent, AuditSink, BearerAuthenticator, CodexHttpClient,
     ConversationService, CoreGateway, CredentialRecord, EventBus, ExecutionResult, KnowledgeClient,
     KnowledgeConfig, PolicyEngine, Principal, PrometheusTelemetryAdapter, RestrictedExecutor,
-    TelemetryService, Transport, TransportConfig, VoicePipeline, VoicePipelineConfig,
-    WazuhSecurityPoller, DEFAULT_TELEMETRY_INTERVAL,
+    SkillMemoryClient, SkillMemoryConfig, TelemetryService, Transport, TransportConfig,
+    VoicePipeline, VoicePipelineConfig, WazuhSecurityPoller, DEFAULT_TELEMETRY_INTERVAL,
 };
 use reqwest::Url;
 use serde::Deserialize;
@@ -17,6 +17,7 @@ const VOICE_CREDENTIAL_NAME: &str = "voice-service-token";
 const LITELLM_CREDENTIAL_NAME: &str = "litellm-token";
 const CODEX_CREDENTIAL_NAME: &str = "codex-service-token";
 const RAG_EMBEDDINGS_CREDENTIAL_NAME: &str = "rag-embeddings-token";
+const SKILL_MEMORY_CREDENTIAL_NAME: &str = "skill-memory-embeddings-token";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -84,9 +85,14 @@ async fn run() -> Result<(), &'static str> {
     let codex_configured = codex.is_some();
     let knowledge = load_knowledge_client()?;
     let rag_configured = knowledge.is_some();
+    let skill_memory = load_skill_memory_client()?;
+    let skill_memory_configured = skill_memory.is_some();
     let mut conversation = ConversationService::new(voice.clone(), codex, events.clone());
     if let Some(knowledge) = knowledge {
         conversation = conversation.with_knowledge(knowledge);
+    }
+    if let Some(skill_memory) = skill_memory {
+        conversation = conversation.with_skill_memory(skill_memory);
     }
     let transport = Transport::with_config(
         gateway,
@@ -173,7 +179,9 @@ async fn run() -> Result<(), &'static str> {
         tokio::spawn(poller.run_until(transport.event_bus(), std::future::pending()))
     };
 
-    eprintln!("jarvis-core ready on {bind_address}; rag_enabled={rag_configured}");
+    eprintln!(
+        "jarvis-core ready on {bind_address}; rag_enabled={rag_configured}; skill_memory_enabled={skill_memory_configured}"
+    );
     let result = serve_until(listener, transport, shutdown_signal())
         .await
         .map_err(|_| "network server stopped unexpectedly");
@@ -229,6 +237,45 @@ fn load_knowledge_client() -> Result<Option<KnowledgeClient>, &'static str> {
     })
     .map(Some)
     .map_err(|_| "RAG configuration is invalid")
+}
+
+fn load_skill_memory_client() -> Result<Option<SkillMemoryClient>, &'static str> {
+    let collection = env::var("JARVIS_SKILL_MEMORY_COLLECTION").ok();
+    let embedding_model = env::var("JARVIS_SKILL_MEMORY_EMBEDDING_MODEL").ok();
+    if collection.is_none() && embedding_model.is_none() {
+        return Ok(None);
+    }
+    let collection = collection
+        .ok_or("JARVIS_SKILL_MEMORY_COLLECTION is required when skill memory is configured")?;
+    let embedding_model = embedding_model
+        .ok_or("JARVIS_SKILL_MEMORY_EMBEDDING_MODEL is required when skill memory is configured")?;
+    let qdrant_base_url = env::var("JARVIS_QDRANT_URL")
+        .map_err(|_| "JARVIS_QDRANT_URL is required when skill memory is configured")?
+        .parse()
+        .map_err(|_| "JARVIS_QDRANT_URL is invalid")?;
+    let litellm_base_url = env::var("JARVIS_LITELLM_URL")
+        .map_err(|_| "JARVIS_LITELLM_URL is required")?
+        .parse()
+        .map_err(|_| "JARVIS_LITELLM_URL is invalid")?;
+    let score_threshold = env::var("JARVIS_SKILL_MEMORY_SCORE_THRESHOLD")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<f64>()
+                .map_err(|_| "JARVIS_SKILL_MEMORY_SCORE_THRESHOLD is invalid")
+        })
+        .transpose()?
+        .unwrap_or(0.60);
+    SkillMemoryClient::new(SkillMemoryConfig {
+        litellm_base_url,
+        litellm_token: load_secret(SKILL_MEMORY_CREDENTIAL_NAME, 20)?,
+        embedding_model,
+        qdrant_base_url,
+        collection,
+        score_threshold,
+    })
+    .map(Some)
+    .map_err(|_| "skill memory configuration is invalid")
 }
 
 fn agent_health_url(

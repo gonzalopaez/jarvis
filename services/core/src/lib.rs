@@ -16,6 +16,8 @@ mod routing;
 #[cfg(feature = "network-server")]
 mod security;
 mod session;
+#[cfg(feature = "network-server")]
+mod skill_memory;
 mod soc;
 #[cfg(feature = "network-server")]
 mod soc_cases;
@@ -62,6 +64,8 @@ pub use session::{
     IssuedSession, SessionConfigError, SessionIssueError, SessionStore, DEFAULT_MAX_SESSIONS,
     DEFAULT_SESSION_TTL, MAX_SESSIONS, SESSION_COOKIE_NAME,
 };
+#[cfg(feature = "network-server")]
+pub use skill_memory::{SkillMemoryClient, SkillMemoryConfig, SkillMemoryError};
 pub use soc::{
     calculate_confidence, calculate_final_priority, calculate_risk, count_independent_sources,
     is_critical_candidate, AiVerdict, AnalysisLevel, AnalystVerdict, CanonicalWazuhEvent,
